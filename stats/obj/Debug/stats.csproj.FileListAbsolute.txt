@@ -1,0 +1,9 @@
+C:\Users\Anon\source\repos\stats\stats\bin\Debug\stats.exe.config
+C:\Users\Anon\source\repos\stats\stats\bin\Debug\stats.exe
+C:\Users\Anon\source\repos\stats\stats\bin\Debug\stats.pdb
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.csproj.AssemblyReference.cache
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.Properties.Resources.resources
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.csproj.GenerateResource.cache
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.csproj.CoreCompileInputs.cache
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.exe
+C:\Users\Anon\source\repos\stats\stats\obj\Debug\stats.pdb

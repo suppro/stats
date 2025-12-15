@@ -758,7 +758,7 @@ namespace stats
                             lootStartTime = DateTime.Now;
                             AddLog("Начинаем сбор лута...");
                             // Выполняем сбор лута синхронно, чтобы не начинать атаку следующего моба
-                            KeyboardHelper.SendKeyE(gameProcess, 4, AddLog);
+                            KeyboardHelper.SendKeyE(gameProcess, 5, AddLog);
                             // Ждем завершения сбора лута (2 нажатия * 0.7 сек + буфер)
                             System.Threading.Thread.Sleep(1000); // Дополнительная пауза для завершения
                             isLooting = false;

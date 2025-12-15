@@ -73,8 +73,8 @@ namespace stats
             YOffset = 0x2AE4,
             ZOffset = 0x2AE8,
             TargetOffset = 0xAC,
-            AttackSet1Offset = 0x2AEC, // не в бою = 65536, в бою = 3
-            AttackSet2Offset = 0x2AAC, // не в бою = 0, в бою = 257
+            AttackSet1Offset = 0x2FE4, // Новые офсеты для атаки
+            AttackSet2Offset = 0x2FE8,
             MobSignature = 56124016, // Новая сигнатура для tw
             // Офсеты мобов для TW (от адреса моба 04A69FC0)
             MobIdOffset = 0x0C,        // 04A69FCC - 04A69FC0
@@ -83,12 +83,12 @@ namespace stats
             MobYOffset = 0x2AC8,       // 04A6CA88 - 04A69FC0
             MobZOffset = 0x2ACC,       // 04A6CA8C - 04A69FC0
             MobUniqueIdOffset = 0xA8,  // 04A6A068 - 04A69FC0
-            MobUniqueId2Offset = 0xC0, // 04A6A080 - 04A69FC0 (второе уникальное ID)
-            TargetOffset2 = 0xC8,      // Второй офсет для таргета (от playerBase)
-            AttackValue1 = 3,      // для 0x2AEC (записываем 3)
-            AttackValue2 = 257,    // для 0x2AAC
-            ResetValue1 = 65536,   // для 0x2AEC (вернуть в не бой)
-            ResetValue2 = 0        // для 0x2AAC (вернуть в не бой)
+            MobUniqueId2Offset = 0,    // Не используем второй UniqueID (как на Default)
+            TargetOffset2 = 0,         // Не используем второй таргет (как на Default)
+            AttackValue1 = 3,          // Такие же значения как на Default
+            AttackValue2 = 65536,
+            ResetValue1 = 0,           // Такие же значения сброса как на Default
+            ResetValue2 = 0
         };
     }
 }

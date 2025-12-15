@@ -64,7 +64,7 @@ namespace stats
         {
             //название окна не менять
             this.Text = "Stats";
-            this.Size = new Size(800, 700);
+            this.Size = new Size(770, 780);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -655,6 +655,12 @@ namespace stats
                 return;
             }
 
+            // Проверяем HP и лечим в процессе атаки, если включено
+            if (enableAutoHeal)
+            {
+                AutoHeal();
+            }
+
             // Проверяем, есть ли текущая цель и жива ли она
             if (currentTarget.HasValue)
             {
@@ -678,19 +684,13 @@ namespace stats
 
                         AddLog($"Моб убит: {mobName} (ID: {killedMobId})");
 
-                        // Отправляем клавишу E для сбора лута, если включено
-                        if (enableLootCollection)
-                        {
-                            KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
-                        }
+                    // Отправляем клавишу E для сбора лута, если включено
+                    if (enableLootCollection)
+                    {
+                        KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
+                    }
 
-                        // Автохил после убийства моба, если включено
-                        if (enableAutoHeal)
-                        {
-                            AutoHeal();
-                        }
-
-                        lblKilledCount.Text = $"Убито: {killedMobCount}";
+                    lblKilledCount.Text = $"Убито: {killedMobCount}";
                     }
                     else
                     {
@@ -714,12 +714,6 @@ namespace stats
                     if (enableLootCollection)
                     {
                         KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
-                    }
-
-                    // Автохил после убийства моба, если включено
-                    if (enableAutoHeal)
-                    {
-                        AutoHeal();
                     }
 
                     lblKilledCount.Text = $"Убито: {killedMobCount}";

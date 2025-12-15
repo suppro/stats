@@ -24,35 +24,169 @@ namespace stats
         [DllImport("kernel32.dll")]
         static extern bool CloseHandle(IntPtr hObject);
 
+        [DllImport("kernel32.dll")]
+        static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
+        [DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        static extern uint SendInput(uint nInputs, [MarshalAs(UnmanagedType.LPArray), In] INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll")]
+        static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        const uint WM_KEYDOWN = 0x0100;
+        const uint WM_KEYUP = 0x0101;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct INPUT
+        {
+            public uint type;
+            public INPUTUNION U;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct INPUTUNION
+        {
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        const uint INPUT_KEYBOARD = 1;
+        const uint KEYEVENTF_KEYUP = 0x0002;
+        const ushort VK_E = 0x45;
+        const ushort VK_1 = 0x31;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct MEMORY_BASIC_INFORMATION
+        {
+            public IntPtr BaseAddress;
+            public IntPtr AllocationBase;
+            public uint AllocationProtect;
+            public IntPtr RegionSize;
+            public uint State;
+            public uint Protect;
+            public uint Type;
+        }
+
         const uint PROCESS_VM_READ = 0x0010;
         const uint PROCESS_VM_WRITE = 0x0020;
         const uint PROCESS_QUERY_INFORMATION = 0x0400;
+        const uint MEM_COMMIT = 0x1000;
+        const uint PAGE_READONLY = 0x02;
+        const uint PAGE_READWRITE = 0x04;
+        const uint PAGE_EXECUTE_READ = 0x20;
+        const uint PAGE_EXECUTE_READWRITE = 0x40;
 
-        // Базовые адреса
-        private static readonly int PLAYER_BASE_OFFSET = 0x01592584;
-        private static readonly int MOB_BASE_OFFSET = 0x01592550;
+        private class ServerOffsets
+        {
+            public int BaseOffset;
+            public bool UseFirstPointer;
+            public int FirstPointerOffset;
+            public bool UseSecondPointer; // Для TW: нужно читать указатель дважды
+            public int HpOffset;
+            public int MpOffset;
+            public int XOffset;
+            public int YOffset;
+            public int ZOffset;
+            public int TargetOffset;
+            public int AttackSet1Offset;
+            public int AttackSet2Offset;
+            public int MobSignature;
+            // Офсеты мобов
+            public int MobIdOffset;
+            public int MobHpOffset;
+            public int MobXOffset;
+            public int MobYOffset;
+            public int MobZOffset;
+            public int MobUniqueIdOffset;
+            public int MobUniqueId2Offset; // Второе уникальное ID (только для TW)
+            public int TargetOffset2; // Второй офсет для таргета (только для TW)
+            // Значения для атаки (для default: set1=3, set2=65536; для tw: set1=3, set2=257)
+            public int AttackValue1;
+            public int AttackValue2;
+            // Значения для сброса (для default: 0,0; для tw: 65536,0)
+            public int ResetValue1;
+            public int ResetValue2;
+        }
 
-        // Оффсеты персонажа (прямые адреса)
-        private static readonly int PLAYER_HP_OFFSET = 0xFC0;
-        private static readonly int PLAYER_MP_OFFSET = 0xFC4;
-        private static readonly int PLAYER_X_OFFSET = 0x2B70;
-        private static readonly int PLAYER_Y_OFFSET = 0x2B74;
-        private static readonly int PLAYER_Z_OFFSET = 0x2B78;
-        private static readonly int PLAYER_TARGET_OFFSET = 0x101C;
-        private static readonly int PLAYER_AUTO_ATTACK_SET1_OFFSET = 0x3094;
-        private static readonly int PLAYER_AUTO_ATTACK_SET2_OFFSET = 0x3098;
+        // Конфигурации офсетов для разных серверов
+        private static readonly ServerOffsets OffsetsDefault = new ServerOffsets
+        {
+            BaseOffset = 0x01592584,
+            UseFirstPointer = false,
+            FirstPointerOffset = 0,
+            UseSecondPointer = false,
+            HpOffset = 0xFC0,
+            MpOffset = 0xFC4,
+            XOffset = 0x2B70,
+            YOffset = 0x2B74,
+            ZOffset = 0x2B78,
+            TargetOffset = 0x101C,
+            AttackSet1Offset = 0x3094,
+            AttackSet2Offset = 0x3098,
+            MobSignature = 24831816, // Старая сигнатура для default
+            MobIdOffset = 0x0C,
+            MobHpOffset = 0x40,
+            MobXOffset = 0x1BF0,
+            MobYOffset = 0x1BF4,
+            MobZOffset = 0x1BF8,
+            MobUniqueIdOffset = 0x98,
+            MobUniqueId2Offset = 0, // Нет второго уникального ID для default
+            TargetOffset2 = 0, // Нет второго таргета для default
+            AttackValue1 = 3,
+            AttackValue2 = 65536,
+            ResetValue1 = 0,
+            ResetValue2 = 0
+        };
 
-        // Оффсеты для списка мобов
-        private static readonly int MOB_LIST_OFFSET = -0x100000;
-        private static readonly int MAX_MOB_COUNT = 1000000;
-
-        // Оффсеты внутри структуры моба
-        private static readonly int MOB_ID_OFFSET = 0x0C;
-        private static readonly int MOB_HP_OFFSET = 0x40;
-        private static readonly int MOB_X_OFFSET = 0x1BF0;
-        private static readonly int MOB_Y_OFFSET = 0x1BF4;
-        private static readonly int MOB_Z_OFFSET = 0x1BF8;
-        private static readonly int MOB_UNIQUE_ID_OFFSET = 0x98;
+        private static readonly ServerOffsets OffsetsTw = new ServerOffsets
+        {
+            BaseOffset = 0x034182B8,
+            UseFirstPointer = true,
+            FirstPointerOffset = 0x60,
+            UseSecondPointer = true, // Для TW: читаем указатель дважды
+            // "R2Client.exe"+034182B8 -> указатель -> +60 -> указатель -> +офсеты
+            HpOffset = 0x40,
+            MpOffset = 0x44,
+            XOffset = 0x2AE0,
+            YOffset = 0x2AE4,
+            ZOffset = 0x2AE8,
+            TargetOffset = 0xAC,
+            AttackSet1Offset = 0x2AEC, // не в бою = 65536, в бою = 3
+            AttackSet2Offset = 0x2AAC, // не в бою = 0, в бою = 257
+            MobSignature = 56124016, // Новая сигнатура для tw
+            // Офсеты мобов для TW (от адреса моба 04A69FC0)
+            MobIdOffset = 0x0C,        // 04A69FCC - 04A69FC0
+            MobHpOffset = 0x40,        // 04A6A000 - 04A69FC0
+            MobXOffset = 0x2AC4,       // 04A6CA84 - 04A69FC0
+            MobYOffset = 0x2AC8,       // 04A6CA88 - 04A69FC0
+            MobZOffset = 0x2ACC,       // 04A6CA8C - 04A69FC0
+            MobUniqueIdOffset = 0xA8,  // 04A6A068 - 04A69FC0
+            MobUniqueId2Offset = 0xC0, // 04A6A080 - 04A69FC0 (второе уникальное ID)
+            TargetOffset2 = 0xC8,      // Второй офсет для таргета (от playerBase)
+            AttackValue1 = 3,      // для 0x2AEC (записываем 3)
+            AttackValue2 = 257,    // для 0x2AAC
+            ResetValue1 = 65536,   // для 0x2AEC (вернуть в не бой)
+            ResetValue2 = 0        // для 0x2AAC (вернуть в не бой)
+        };
 
         private Timer updateTimer;
         private Timer attackTimer;
@@ -64,36 +198,41 @@ namespace stats
 
         // Состояние атаки
         private bool isAttacking = false;
-        private int targetMobCount = 0;
         private int killedMobCount = 0;
         private MobData? currentTarget = null;
+        private bool enableLootCollection = false;
+        private bool enableAutoHeal = false;
+        
+        // Кэш для списка мобов (адреса статичные, сканируем только 1 раз при старте)
+        private List<IntPtr> cachedMobAddresses = new List<IntPtr>();
+        private bool addressesScanned = false;
+        private bool connectionLogged = false;
+        private DateTime lastDebugLogTime = DateTime.MinValue;
 
         // Labels для персонажа
         private Label lblPlayerHP;
         private Label lblPlayerMP;
-        private Label lblPlayerX;
-        private Label lblPlayerY;
-        private Label lblPlayerZ;
-
-        // Labels для моба
-        private Label lblMobID;
-        private Label lblMobHP;
-        private Label lblMobX;
-        private Label lblMobY;
-        private Label lblMobZ;
-
-        // Label для расстояния
-        private Label lblDistance;
 
         // Label для статуса
         private Label lblStatus;
 
         // UI элементы для атаки
-        private TextBox txtMobCount;
+        private ComboBox cmbServer;
+        private TextBox txtMobIds;
+        private CheckBox chkLootCollection;
+        private CheckBox chkAutoHeal;
         private Button btnStart;
         private Button btnStop;
-        private Label lblTargetName;
+        private Button btnCopyLogs;
+        private Button btnClearLogs;
         private Label lblKilledCount;
+        private ListBox listBoxLogs;
+        
+        // Выбранный сервер
+        private string selectedServer = "default";
+        
+        // Список ID мобов для атаки
+        private HashSet<int> targetMobIds = new HashSet<int>();
 
         public Form1()
         {
@@ -105,8 +244,9 @@ namespace stats
 
         private void SetupForm()
         {
+            //название окна не менять
             this.Text = "Stats";
-            this.Size = new Size(500, 600);
+            this.Size = new Size(800, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -148,122 +288,34 @@ namespace stats
                 Location = new Point(30, yPos)
             };
             this.Controls.Add(lblPlayerMP);
+            yPos += 40;
+
+            // Выбор сервера
+            Label lblServer = new Label
+            {
+                Text = "Сервер:",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F),
+                AutoSize = true,
+                Location = new Point(30, yPos)
+            };
+            this.Controls.Add(lblServer);
             yPos += 25;
 
-            // Координаты персонажа
-            lblPlayerX = new Label
+            cmbServer = new ComboBox
             {
-                Text = "X: ---",
+                Size = new Size(150, 25),
+                Location = new Point(30, yPos),
+                BackColor = Color.DarkGray,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
+                Font = new Font("Segoe UI", 10F),
+                DropDownStyle = ComboBoxStyle.DropDownList
             };
-            this.Controls.Add(lblPlayerX);
-            yPos += 22;
-
-            lblPlayerY = new Label
-            {
-                Text = "Y: ---",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblPlayerY);
-            yPos += 22;
-
-            lblPlayerZ = new Label
-            {
-                Text = "Z: ---",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblPlayerZ);
-            yPos += 35;
-
-            // Заголовок моба
-            Label lblMobTitle = new Label
-            {
-                Text = "=== БЛИЖАЙШИЙ МОБ ===",
-                ForeColor = Color.Orange,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(20, yPos)
-            };
-            this.Controls.Add(lblMobTitle);
-            yPos += 35;
-
-            // ID моба
-            lblMobID = new Label
-            {
-                Text = "ID: ---",
-                ForeColor = Color.Yellow,
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblMobID);
-            yPos += 25;
-
-            // HP моба
-            lblMobHP = new Label
-            {
-                Text = "HP: ---",
-                ForeColor = Color.Red,
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblMobHP);
-            yPos += 25;
-
-            // Координаты моба
-            lblMobX = new Label
-            {
-                Text = "X: ---",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblMobX);
-            yPos += 22;
-
-            lblMobY = new Label
-            {
-                Text = "Y: ---",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblMobY);
-            yPos += 22;
-
-            lblMobZ = new Label
-            {
-                Text = "Z: ---",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblMobZ);
-            yPos += 35;
-
-            // Расстояние
-            lblDistance = new Label
-            {
-                Text = "Расстояние: ---",
-                ForeColor = Color.Lime,
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(20, yPos)
-            };
-            this.Controls.Add(lblDistance);
+            cmbServer.Items.Add("default");
+            cmbServer.Items.Add("tw");
+            cmbServer.SelectedIndex = 0;
+            cmbServer.SelectedIndexChanged += CmbServer_SelectedIndexChanged;
+            this.Controls.Add(cmbServer);
             yPos += 35;
 
             // Статус
@@ -290,27 +342,54 @@ namespace stats
             this.Controls.Add(lblAttackTitle);
             yPos += 35;
 
-            // Поле для количества мобов
-            Label lblMobCountLabel = new Label
+            // Поле для ввода ID мобов
+            Label lblMobIdsLabel = new Label
             {
-                Text = "Убить мобов:",
+                Text = "ID мобов (через запятую):",
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
+                Font = new Font("Segoe UI", 10F),
                 AutoSize = true,
                 Location = new Point(30, yPos)
             };
-            this.Controls.Add(lblMobCountLabel);
+            this.Controls.Add(lblMobIdsLabel);
+            yPos += 25;
 
-            txtMobCount = new TextBox
+            txtMobIds = new TextBox
             {
-                Text = "10",
-                Size = new Size(80, 25),
-                Location = new Point(130, yPos - 2),
+                Text = "",
+                Size = new Size(250, 25),
+                Location = new Point(30, yPos),
                 BackColor = Color.DarkGray,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10F)
             };
-            this.Controls.Add(txtMobCount);
+            this.Controls.Add(txtMobIds);
+            yPos += 35;
+
+            // Чекбокс сбора лута
+            chkLootCollection = new CheckBox
+            {
+                Text = "Сбор лута (E после убийства)",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F),
+                AutoSize = true,
+                Location = new Point(30, yPos),
+                BackColor = Color.Black
+            };
+            this.Controls.Add(chkLootCollection);
+            yPos += 35;
+
+            // Чекбокс автохила
+            chkAutoHeal = new CheckBox
+            {
+                Text = "Автохил (1 при HP < 80, до HP > 120)",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F),
+                AutoSize = true,
+                Location = new Point(30, yPos),
+                BackColor = Color.Black
+            };
+            this.Controls.Add(chkAutoHeal);
             yPos += 35;
 
             // Кнопки старт/стоп
@@ -342,38 +421,69 @@ namespace stats
             this.Controls.Add(btnStop);
             yPos += 45;
 
-            // Имя текущей цели
-            Label lblTargetLabel = new Label
-            {
-                Text = "Цель:",
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F),
-                AutoSize = true,
-                Location = new Point(30, yPos)
-            };
-            this.Controls.Add(lblTargetLabel);
-
-            lblTargetName = new Label
-            {
-                Text = "---",
-                ForeColor = Color.Yellow,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(80, yPos)
-            };
-            this.Controls.Add(lblTargetName);
-            yPos += 30;
-
             // Счетчик убитых
             lblKilledCount = new Label
             {
-                Text = "Убито: 0 / 0",
+                Text = "Убито: 0",
                 ForeColor = Color.Lime,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 AutoSize = true,
                 Location = new Point(30, yPos)
             };
             this.Controls.Add(lblKilledCount);
+            yPos += 35;
+
+            // Окно логов
+            Label lblLogsTitle = new Label
+            {
+                Text = "Логи:",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(30, yPos)
+            };
+            this.Controls.Add(lblLogsTitle);
+            yPos += 25;
+
+            listBoxLogs = new ListBox
+            {
+                Size = new Size(700, 150),
+                Location = new Point(30, yPos),
+                BackColor = Color.DarkGray,
+                ForeColor = Color.White,
+                Font = new Font("Consolas", 9F),
+                IntegralHeight = false,
+                SelectionMode = SelectionMode.MultiExtended
+            };
+            this.Controls.Add(listBoxLogs);
+            yPos += 160;
+
+            // Кнопки для работы с логами
+            btnCopyLogs = new Button
+            {
+                Text = "Копировать логи",
+                Size = new Size(120, 30),
+                Location = new Point(30, yPos),
+                BackColor = Color.DarkBlue,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9F),
+                FlatStyle = FlatStyle.Flat
+            };
+            btnCopyLogs.Click += BtnCopyLogs_Click;
+            this.Controls.Add(btnCopyLogs);
+
+            btnClearLogs = new Button
+            {
+                Text = "Очистить логи",
+                Size = new Size(120, 30),
+                Location = new Point(160, yPos),
+                BackColor = Color.DarkRed,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9F),
+                FlatStyle = FlatStyle.Flat
+            };
+            btnClearLogs.Click += BtnClearLogs_Click;
+            this.Controls.Add(btnClearLogs);
         }
 
         private void StartUpdateTimer()
@@ -391,6 +501,7 @@ namespace stats
             // Получаем процесс
             if (gameProcess == null || gameProcess.HasExited)
             {
+                connectionLogged = false; // Сбрасываем флаг при потере подключения
                 Process[] processes = Process.GetProcessesByName("R2Client");
                 if (processes.Length == 0)
                 {
@@ -409,48 +520,19 @@ namespace stats
             }
 
             UpdateStatus($"Подключено: R2Client.exe (PID: {gameProcess.Id})", Color.Lime);
+            
+            // Логируем подключение только один раз
+            if (!connectionLogged)
+            {
+                AddLog($"Подключено к процессу R2Client.exe (PID: {gameProcess.Id})");
+                connectionLogged = true;
+            }
 
             // Читаем данные персонажа
             var playerData = ReadPlayerData();
             UpdatePlayerData(playerData);
 
-            // Читаем список мобов и находим ближайшего (если не атакуем)
-            if (!isAttacking)
-            {
-                var nearestMob = FindNearestMob(playerData);
-                if (nearestMob.HasValue)
-                {
-                    UpdateMobData(nearestMob.Value);
-                    if (playerData.IsValid)
-                    {
-                        float distance = CalculateDistance(playerData.X, playerData.Y, playerData.Z, 
-                            nearestMob.Value.X, nearestMob.Value.Y, nearestMob.Value.Z);
-                        lblDistance.Text = $"Расстояние: {distance:F2}";
-                        lblDistance.ForeColor = Color.Lime;
-                    }
-                }
-                else
-                {
-                    ClearMobData();
-                    lblDistance.Text = "Расстояние: ---";
-                    lblDistance.ForeColor = Color.Gray;
-                }
-            }
-            else
-            {
-                // Во время атаки обновляем данные текущей цели
-                if (currentTarget.HasValue)
-                {
-                    UpdateMobData(currentTarget.Value);
-                    if (playerData.IsValid)
-                    {
-                        float distance = CalculateDistance(playerData.X, playerData.Y, playerData.Z, 
-                            currentTarget.Value.X, currentTarget.Value.Y, currentTarget.Value.Z);
-                        lblDistance.Text = $"Расстояние: {distance:F2}";
-                        lblDistance.ForeColor = Color.Lime;
-                    }
-                }
-            }
+            // Обновляем только данные персонажа
         }
 
         private void UpdateStatus(string text, Color color)
@@ -463,20 +545,6 @@ namespace stats
         {
             lblPlayerHP.Text = "HP: ---";
             lblPlayerMP.Text = "MP: ---";
-            lblPlayerX.Text = "X: ---";
-            lblPlayerY.Text = "Y: ---";
-            lblPlayerZ.Text = "Z: ---";
-            ClearMobData();
-            lblDistance.Text = "Расстояние: ---";
-        }
-
-        private void ClearMobData()
-        {
-            lblMobID.Text = "ID: ---";
-            lblMobHP.Text = "HP: ---";
-            lblMobX.Text = "X: ---";
-            lblMobY.Text = "Y: ---";
-            lblMobZ.Text = "Z: ---";
         }
 
         private void UpdatePlayerData(PlayerData data)
@@ -487,41 +555,39 @@ namespace stats
                 lblPlayerHP.ForeColor = Color.Red;
                 lblPlayerMP.Text = $"MP: {data.MP}";
                 lblPlayerMP.ForeColor = Color.Blue;
-                lblPlayerX.Text = $"X: {data.X:F2}";
-                lblPlayerX.ForeColor = Color.White;
-                lblPlayerY.Text = $"Y: {data.Y:F2}";
-                lblPlayerY.ForeColor = Color.White;
-                lblPlayerZ.Text = $"Z: {data.Z:F2}";
-                lblPlayerZ.ForeColor = Color.White;
             }
             else
             {
                 lblPlayerHP.Text = "HP: ---";
                 lblPlayerMP.Text = "MP: ---";
-                lblPlayerX.Text = "X: ---";
-                lblPlayerY.Text = "Y: ---";
-                lblPlayerZ.Text = "Z: ---";
             }
         }
 
-        private void UpdateMobData(MobData data)
+        private void AddLog(string message)
         {
-            if (data.IsValid)
+            if (listBoxLogs == null) return;
+
+            string timestamp = DateTime.Now.ToString("HH:mm:ss");
+            string logMessage = $"[{timestamp}] {message}";
+
+            if (listBoxLogs.InvokeRequired)
             {
-                lblMobID.Text = $"ID: {data.ID}";
-                lblMobID.ForeColor = Color.Yellow;
-                lblMobHP.Text = $"HP: {data.HP}";
-                lblMobHP.ForeColor = Color.Red;
-                lblMobX.Text = $"X: {data.X:F2}";
-                lblMobX.ForeColor = Color.White;
-                lblMobY.Text = $"Y: {data.Y:F2}";
-                lblMobY.ForeColor = Color.White;
-                lblMobZ.Text = $"Z: {data.Z:F2}";
-                lblMobZ.ForeColor = Color.White;
+                listBoxLogs.Invoke((MethodInvoker)delegate
+                {
+                    listBoxLogs.Items.Insert(0, logMessage);
+                    if (listBoxLogs.Items.Count > 100)
+                    {
+                        listBoxLogs.Items.RemoveAt(listBoxLogs.Items.Count - 1);
+                    }
+                });
             }
             else
             {
-                ClearMobData();
+                listBoxLogs.Items.Insert(0, logMessage);
+                if (listBoxLogs.Items.Count > 100)
+                {
+                    listBoxLogs.Items.RemoveAt(listBoxLogs.Items.Count - 1);
+                }
             }
         }
 
@@ -584,6 +650,21 @@ namespace stats
             return 0;
         }
 
+        private long ReadInt64(IntPtr address)
+        {
+            if (hProcess == IntPtr.Zero) return 0;
+
+            byte[] buffer = new byte[8];
+            int bytesRead;
+
+            if (ReadProcessMemory(hProcess, address, buffer, 8, out bytesRead) && bytesRead == 8)
+            {
+                return BitConverter.ToInt64(buffer, 0);
+            }
+
+            return 0;
+        }
+
         private bool WriteInt32(IntPtr address, int value)
         {
             if (hProcess == IntPtr.Zero) return false;
@@ -609,6 +690,45 @@ namespace stats
             return 0f;
         }
 
+        private ServerOffsets GetCurrentOffsets()
+        {
+            return selectedServer == "tw" ? OffsetsTw : OffsetsDefault;
+        }
+
+        private IntPtr GetPlayerBaseAddress(IntPtr moduleBase)
+        {
+            if (moduleBase == IntPtr.Zero) return IntPtr.Zero;
+
+            var cfg = GetCurrentOffsets();
+            IntPtr basePtrAddress = IntPtr.Add(moduleBase, cfg.BaseOffset);
+            
+            // Читаем первый указатель
+            IntPtr firstPtr = ReadPointer(basePtrAddress);
+            if (firstPtr == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            if (cfg.UseFirstPointer)
+            {
+                if (cfg.UseSecondPointer)
+                {
+                    // Для tw: "R2Client.exe"+034182B8 -> указатель -> +60 -> указатель
+                    IntPtr secondPtrAddress = IntPtr.Add(firstPtr, cfg.FirstPointerOffset);
+                    IntPtr secondPtr = ReadPointer(secondPtrAddress);
+                    if (secondPtr == IntPtr.Zero) return IntPtr.Zero;
+                    return secondPtr;
+                }
+                else
+                {
+                    // Просто прибавляем офсет к первому указателю
+                    return IntPtr.Add(firstPtr, cfg.FirstPointerOffset);
+                }
+            }
+
+            return firstPtr;
+        }
+
         private PlayerData ReadPlayerData()
         {
             PlayerData data = new PlayerData { IsValid = false };
@@ -619,25 +739,46 @@ namespace stats
                 IntPtr moduleBase = GetModuleBaseAddress("R2Client.exe");
                 if (moduleBase == IntPtr.Zero) return data;
 
-                // Вычисляем адрес указателя: R2Client.exe + 0x01592584
-                IntPtr basePtrAddress = IntPtr.Add(moduleBase, PLAYER_BASE_OFFSET);
+                var cfg = GetCurrentOffsets();
+                IntPtr playerBase = GetPlayerBaseAddress(moduleBase);
 
-                // Читаем указатель по этому адресу
-                IntPtr playerBase = ReadPointer(basePtrAddress);
-                if (playerBase == IntPtr.Zero) return data;
+                if (playerBase == IntPtr.Zero)
+                {
+                    // Логируем ошибку только раз в 5 секунд
+                    if ((DateTime.Now - lastDebugLogTime).TotalSeconds >= 5.0)
+                    {
+                        AddLog($"[ОШИБКА] PlayerBase = Zero, не удалось получить адрес персонажа (сервер: {selectedServer})");
+                        lastDebugLogTime = DateTime.Now;
+                    }
+                    return data;
+                }
 
                 // Читаем данные персонажа относительно указателя
                 // HP и MP - 4 байта (int32), координаты - float
-                data.HP = ReadInt32(IntPtr.Add(playerBase, PLAYER_HP_OFFSET));
-                data.MP = ReadInt32(IntPtr.Add(playerBase, PLAYER_MP_OFFSET));
-                data.X = ReadFloat(IntPtr.Add(playerBase, PLAYER_X_OFFSET));
-                data.Y = ReadFloat(IntPtr.Add(playerBase, PLAYER_Y_OFFSET));
-                data.Z = ReadFloat(IntPtr.Add(playerBase, PLAYER_Z_OFFSET));
+                IntPtr hpAddr = IntPtr.Add(playerBase, cfg.HpOffset);
+                IntPtr mpAddr = IntPtr.Add(playerBase, cfg.MpOffset);
+                IntPtr xAddr = IntPtr.Add(playerBase, cfg.XOffset);
+                
+                data.HP = ReadInt32(hpAddr);
+                data.MP = ReadInt32(mpAddr);
+                data.X = ReadFloat(xAddr);
+                data.Y = ReadFloat(IntPtr.Add(playerBase, cfg.YOffset));
+                data.Z = ReadFloat(IntPtr.Add(playerBase, cfg.ZOffset));
 
                 // Проверяем валидность данных
                 if (data.HP > 0 || data.MP > 0 || (data.X != 0f || data.Y != 0f || data.Z != 0f))
                 {
                     data.IsValid = true;
+                }
+                else
+                {
+                    // Логируем ошибки только раз в 5 секунд
+                    if ((DateTime.Now - lastDebugLogTime).TotalSeconds >= 5.0)
+                    {
+                        AddLog($"[ОШИБКА] Данные персонажа невалидны: HP={data.HP}, MP={data.MP}, XYZ=({data.X:F2}, {data.Y:F2}, {data.Z:F2})");
+                        AddLog($"[ОШИБКА] Адреса: PlayerBase={playerBase.ToInt64():X}, HP адрес={hpAddr.ToInt64():X} (offset {cfg.HpOffset:X}), MP адрес={mpAddr.ToInt64():X} (offset {cfg.MpOffset:X})");
+                        lastDebugLogTime = DateTime.Now;
+                    }
                 }
             }
             catch
@@ -647,6 +788,15 @@ namespace stats
 
             return data;
         }
+        
+        private void CmbServer_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (cmbServer.SelectedItem != null)
+            {
+                selectedServer = cmbServer.SelectedItem.ToString();
+                AddLog($"Выбран сервер: {selectedServer}");
+            }
+        }
 
         private List<MobData> ReadMobList()
         {
@@ -654,50 +804,106 @@ namespace stats
 
             try
             {
-                // Получаем базовый адрес модуля
-                IntPtr moduleBase = GetModuleBaseAddress("R2Client.exe");
-                if (moduleBase == IntPtr.Zero) return mobs;
+                if (hProcess == IntPtr.Zero) return mobs;
 
-                // Вычисляем базовый адрес для списка мобов: R2Client.exe + 0x01592550
-                IntPtr mobBasePtr = IntPtr.Add(moduleBase, MOB_BASE_OFFSET);
-
-                // Читаем указатель по базовому адресу
-                IntPtr basePtr = ReadPointer(mobBasePtr);
-                if (basePtr == IntPtr.Zero) return mobs;
-
-                // Вычисляем адрес массива указателей на мобов: basePtr + 0xAC
-                IntPtr mobListPtr = IntPtr.Add(basePtr, MOB_LIST_OFFSET);
-
-                // Проходим по массиву указателей (каждый указатель 4 байта для 32-bit процесса)
-                for (int i = 0; i < MAX_MOB_COUNT; i++)
+                // Используем кэшированные адреса (сканируем только 1 раз при старте)
+                if (cachedMobAddresses.Count == 0)
                 {
-                    // Читаем указатель на моба из массива
-                    IntPtr ptrAddr = IntPtr.Add(mobListPtr, i * 4);
-                    IntPtr mobAddr = ReadPointer(ptrAddr);
+                    return mobs; // Адреса еще не отсканированы
+                }
 
-                    if (mobAddr != IntPtr.Zero)
+                // Для каждого найденного адреса читаем данные моба
+                int validMobsCount = 0;
+                int invalidMobsCount = 0;
+                int invalidIdHpCount = 0;
+                int invalidUniqueIdCount = 0;
+                int invalidCoordsCount = 0;
+                int debugCount = 0; // Логируем только первые 5 адресов
+                
+                foreach (IntPtr mobAddr in cachedMobAddresses)
+                {
+                    // Читаем ID и HP моба для предварительной проверки
+                    var cfg = GetCurrentOffsets();
+                    int id = ReadInt32(IntPtr.Add(mobAddr, cfg.MobIdOffset));
+                    int hp = ReadInt32(IntPtr.Add(mobAddr, cfg.MobHpOffset));
+                    
+                    // Логируем первые несколько адресов для отладки
+                    if (debugCount < 5)
                     {
-                        // Читаем ID моба
-                        int id = ReadInt32(IntPtr.Add(mobAddr, MOB_ID_OFFSET));
+                        int uniqueId = ReadInt32(IntPtr.Add(mobAddr, cfg.MobUniqueIdOffset));
+                        float x = ReadFloat(IntPtr.Add(mobAddr, cfg.MobXOffset));
+                        float y = ReadFloat(IntPtr.Add(mobAddr, cfg.MobYOffset));
+                        float z = ReadFloat(IntPtr.Add(mobAddr, cfg.MobZOffset));
+                        AddLog($"[DEBUG] Адрес моба: {mobAddr.ToInt64():X}");
+                        AddLog($"[DEBUG]   ID offset {cfg.MobIdOffset:X} = {id}, HP offset {cfg.MobHpOffset:X} = {hp}");
+                        AddLog($"[DEBUG]   UniqueID offset {cfg.MobUniqueIdOffset:X} = {uniqueId}");
+                        AddLog($"[DEBUG]   XYZ offsets ({cfg.MobXOffset:X}, {cfg.MobYOffset:X}, {cfg.MobZOffset:X}) = ({x:F2}, {y:F2}, {z:F2})");
+                        debugCount++;
+                    }
 
-                        // Проверяем, что ID валидный (больше 0)
-                        if (id > 0)
+                    // Проверяем, что это действительно моб: ID и HP должны быть > 0 и < 10000
+                    if (id > 0 && id < 10000 && hp > 0 && hp < 10000)
+                    {
+                        // Читаем UniqueID для проверки (int64)
+                        long uniqueId = ReadInt64(IntPtr.Add(mobAddr, cfg.MobUniqueIdOffset));
+                        
+                        // UniqueID не может быть 0 - это обязательное поле
+                        if (uniqueId <= 0)
                         {
-                            MobData mob = new MobData
-                            {
-                                IsValid = true,
-                                ID = id,
-                                UniqueID = ReadInt32(IntPtr.Add(mobAddr, MOB_UNIQUE_ID_OFFSET)),
-                                HP = ReadInt32(IntPtr.Add(mobAddr, MOB_HP_OFFSET)),
-                                X = ReadFloat(IntPtr.Add(mobAddr, MOB_X_OFFSET)),
-                                Y = ReadFloat(IntPtr.Add(mobAddr, MOB_Y_OFFSET)),
-                                Z = ReadFloat(IntPtr.Add(mobAddr, MOB_Z_OFFSET))
-                            };
+                            invalidUniqueIdCount++;
+                            invalidMobsCount++;
+                            continue;
+                        }
+                        
+                        MobData mob = new MobData
+                        {
+                            IsValid = true,
+                            ID = id,
+                            UniqueID = uniqueId,
+                            UniqueID2 = cfg.MobUniqueId2Offset > 0 ? (int)ReadInt64(IntPtr.Add(mobAddr, cfg.MobUniqueId2Offset)) : 0,
+                            HP = hp,
+                            X = ReadFloat(IntPtr.Add(mobAddr, cfg.MobXOffset)),
+                            Y = ReadFloat(IntPtr.Add(mobAddr, cfg.MobYOffset)),
+                            Z = ReadFloat(IntPtr.Add(mobAddr, cfg.MobZOffset))
+                        };
 
+                        // Проверяем валидность координат
+                        // Координаты должны быть не все нули (хотя бы одна координата != 0)
+                        if (mob.X != 0f || mob.Y != 0f || mob.Z != 0f)
+                        {
                             mobs.Add(mob);
+                            validMobsCount++;
+                            
+                            // Логируем первый валидный моб для проверки
+                            if (validMobsCount == 1)
+                            {
+                                AddLog($"[DEBUG] Первый валидный моб: ID={mob.ID}, HP={mob.HP}, UniqueID={mob.UniqueID}, XYZ=({mob.X:F2}, {mob.Y:F2}, {mob.Z:F2})");
+                            }
+                        }
+                        else
+                        {
+                            invalidCoordsCount++;
+                            invalidMobsCount++;
+                            
+                            // Логируем первый моб с нулевыми координатами
+                            if (invalidCoordsCount == 1)
+                            {
+                                AddLog($"[DEBUG] Первый моб с нулевыми координатами: ID={mob.ID}, HP={mob.HP}, UniqueID={mob.UniqueID}, XYZ=({mob.X:F2}, {mob.Y:F2}, {mob.Z:F2})");
+                            }
                         }
                     }
+                    else
+                    {
+                        invalidIdHpCount++;
+                        invalidMobsCount++;
+                    }
                 }
+                
+                // Логируем статистику фильтрации
+                AddLog($"Сканирование мобов: найдено адресов: {cachedMobAddresses.Count}, валидных: {validMobsCount}");
+                AddLog($"  - Отфильтровано по ID/HP: {invalidIdHpCount}");
+                AddLog($"  - Отфильтровано по UniqueID: {invalidUniqueIdCount}");
+                AddLog($"  - Отфильтровано по координатам: {invalidCoordsCount}");
             }
             catch
             {
@@ -705,6 +911,114 @@ namespace stats
             }
 
             return mobs;
+        }
+
+        private MobData? ReadMobByAddress(IntPtr mobAddr)
+        {
+            try
+            {
+                if (hProcess == IntPtr.Zero || mobAddr == IntPtr.Zero) return null;
+
+                var cfg = GetCurrentOffsets();
+                
+                // Читаем ID и HP для проверки валидности
+                int id = ReadInt32(IntPtr.Add(mobAddr, cfg.MobIdOffset));
+                int hp = ReadInt32(IntPtr.Add(mobAddr, cfg.MobHpOffset));
+
+                // Проверяем, что это действительно моб: ID и HP должны быть > 0 и < 10000
+                if (id <= 0 || id >= 10000 || hp <= 0 || hp >= 10000)
+                {
+                    return null;
+                }
+
+                // Читаем UniqueID и проверяем, что он не 0 (int64)
+                long uniqueId = ReadInt64(IntPtr.Add(mobAddr, cfg.MobUniqueIdOffset));
+                if (uniqueId <= 0)
+                {
+                    return null; // UniqueID не может быть 0 или отрицательным
+                }
+
+                MobData mob = new MobData
+                {
+                    IsValid = true,
+                    ID = id,
+                    UniqueID = uniqueId,
+                            UniqueID2 = cfg.MobUniqueId2Offset > 0 ? (int)ReadInt64(IntPtr.Add(mobAddr, cfg.MobUniqueId2Offset)) : 0,
+                    HP = hp,
+                    X = ReadFloat(IntPtr.Add(mobAddr, cfg.MobXOffset)),
+                    Y = ReadFloat(IntPtr.Add(mobAddr, cfg.MobYOffset)),
+                    Z = ReadFloat(IntPtr.Add(mobAddr, cfg.MobZOffset))
+                };
+
+                return mob;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private List<IntPtr> ScanMemoryForValue(int value)
+        {
+            List<IntPtr> addresses = new List<IntPtr>();
+
+            try
+            {
+                if (hProcess == IntPtr.Zero) return addresses;
+
+                byte[] searchBytes = BitConverter.GetBytes(value);
+                IntPtr currentAddress = IntPtr.Zero;
+                MEMORY_BASIC_INFORMATION mbi = new MEMORY_BASIC_INFORMATION();
+
+                // Сканируем все регионы памяти процесса
+                while (VirtualQueryEx(hProcess, currentAddress, out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
+                {
+                    // Проверяем, что регион закоммичен и доступен для чтения
+                    if (mbi.State == MEM_COMMIT &&
+                        (mbi.Protect == PAGE_READONLY || mbi.Protect == PAGE_READWRITE ||
+                         mbi.Protect == PAGE_EXECUTE_READ || mbi.Protect == PAGE_EXECUTE_READWRITE))
+                    {
+                        int regionSize = (int)mbi.RegionSize;
+                        // Ограничиваем размер региона для избежания проблем с большими регионами
+                        if (regionSize > 0 && regionSize < 100 * 1024 * 1024) // До 100MB
+                        {
+                            // Сканируем регион на наличие значения
+                            byte[] buffer = new byte[regionSize];
+                            int bytesRead;
+
+                            if (ReadProcessMemory(hProcess, mbi.BaseAddress, buffer, regionSize, out bytesRead) && bytesRead > 0)
+                            {
+                                // Ищем значение в буфере
+                                for (int i = 0; i <= bytesRead - 4; i++)
+                                {
+                                    if (buffer[i] == searchBytes[0] &&
+                                        buffer[i + 1] == searchBytes[1] &&
+                                        buffer[i + 2] == searchBytes[2] &&
+                                        buffer[i + 3] == searchBytes[3])
+                                    {
+                                        IntPtr foundAddress = IntPtr.Add(mbi.BaseAddress, i);
+                                        addresses.Add(foundAddress);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Переходим к следующему региону
+                    currentAddress = IntPtr.Add(mbi.BaseAddress, (int)mbi.RegionSize);
+                    
+                    // Защита от бесконечного цикла
+                    if (currentAddress.ToInt64() <= mbi.BaseAddress.ToInt64())
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                // В случае ошибки возвращаем найденные адреса
+                System.Diagnostics.Debug.WriteLine($"Ошибка при сканировании памяти: {ex.Message}");
+            }
+
+            return addresses;
         }
 
         private MobData? FindNearestMob(PlayerData player)
@@ -721,6 +1035,12 @@ namespace stats
             {
                 // Пропускаем невалидных и мертвых мобов
                 if (!mob.IsValid || mob.HP <= 0) continue;
+
+                // Фильтруем по ID, если указаны целевые ID
+                if (targetMobIds.Count > 0 && !targetMobIds.Contains(mob.ID))
+                {
+                    continue;
+                }
 
                 float distance = CalculateDistance(player.X, player.Y, player.Z, mob.X, mob.Y, mob.Z);
                 if (distance < minDistance)
@@ -739,6 +1059,135 @@ namespace stats
             float dy = y2 - y1;
             float dz = z2 - z1;
             return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        private void SendKeyEToGame(int count)
+        {
+            try
+            {
+                if (gameProcess == null || gameProcess.HasExited)
+                {
+                    AddLog("ОШИБКА: Процесс игры не найден для отправки клавиши E");
+                    return;
+                }
+
+                // Находим главное окно процесса
+                IntPtr hWnd = gameProcess.MainWindowHandle;
+                if (hWnd == IntPtr.Zero)
+                {
+                    // Пробуем найти окно процесса заново
+                    Process[] processes = Process.GetProcessesByName("R2Client");
+                    if (processes.Length > 0)
+                    {
+                        hWnd = processes[0].MainWindowHandle;
+                    }
+                }
+
+                if (hWnd == IntPtr.Zero)
+                {
+                    AddLog("ОШИБКА: Не удалось найти окно игры для отправки клавиши E");
+                    return;
+                }
+
+                // НЕ активируем окно игры - отправляем клавиши в фоновом режиме
+                // Отправляем клавишу E указанное количество раз
+                for (int i = 0; i < count; i++)
+                {
+                    SendKeyPress(hWnd, VK_E);
+                    if (i < count - 1) // Не делаем паузу после последнего нажатия
+                    {
+                        System.Threading.Thread.Sleep(500); // Пауза 0.7 сек между нажатиями
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"ОШИБКА при отправке клавиши E: {ex.Message}");
+            }
+        }
+
+        private void AutoHeal()
+        {
+            try
+            {
+                var playerData = ReadPlayerData();
+                if (!playerData.IsValid)
+                {
+                    return;
+                }
+
+                // Если HP меньше 80, лечим до тех пор, пока не станет больше 120
+                if (playerData.HP < 80)
+                {
+                    if (gameProcess == null || gameProcess.HasExited)
+                    {
+                        return;
+                    }
+
+                    IntPtr hWnd = gameProcess.MainWindowHandle;
+                    if (hWnd == IntPtr.Zero)
+                    {
+                        Process[] processes = Process.GetProcessesByName("R2Client");
+                        if (processes.Length > 0)
+                        {
+                            hWnd = processes[0].MainWindowHandle;
+                        }
+                    }
+
+                    if (hWnd == IntPtr.Zero)
+                    {
+                        return;
+                    }
+
+                    // НЕ активируем окно - отправляем клавиши в фоновом режиме
+                    int maxHealAttempts = 20; // Максимум попыток лечения
+                    int attempts = 0;
+
+                    while (playerData.HP <= 120 && attempts < maxHealAttempts)
+                    {
+                        SendKeyPress(hWnd, VK_1);
+                        System.Threading.Thread.Sleep(500); // Пауза 0.5 сек между нажатиями
+
+                        // Обновляем данные персонажа
+                        playerData = ReadPlayerData();
+                        if (!playerData.IsValid)
+                        {
+                            break;
+                        }
+
+                        attempts++;
+                    }
+
+                    if (playerData.HP > 120)
+                    {
+                        AddLog($"Автохил: HP восстановлено до {playerData.HP}");
+                    }
+                    else if (attempts >= maxHealAttempts)
+                    {
+                        AddLog($"Автохил: достигнут лимит попыток ({maxHealAttempts}), текущий HP: {playerData.HP}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"ОШИБКА при автохиле: {ex.Message}");
+            }
+        }
+
+        private void SendKeyPress(IntPtr hWnd, ushort virtualKey)
+        {
+            try
+            {
+                // Используем PostMessage для отправки клавиши в окно игры
+                // Это работает даже если окно не в фокусе
+                PostMessage(hWnd, WM_KEYDOWN, (IntPtr)virtualKey, IntPtr.Zero);
+                System.Threading.Thread.Sleep(10); // Небольшая задержка между нажатием и отпусканием
+                PostMessage(hWnd, WM_KEYUP, (IntPtr)virtualKey, IntPtr.Zero);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"ОШИБКА при отправке клавиши: {ex.Message}");
+            }
         }
 
         private void LoadMobNames()
@@ -788,32 +1237,105 @@ namespace stats
 
         private void BtnStart_Click(object sender, EventArgs e)
         {
-            if (!int.TryParse(txtMobCount.Text, out targetMobCount) || targetMobCount <= 0)
+            // Парсим ID мобов из текстового поля
+            targetMobIds.Clear();
+            string idsText = txtMobIds.Text.Trim();
+            if (!string.IsNullOrEmpty(idsText))
             {
-                MessageBox.Show("Введите корректное количество мобов!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                string[] ids = idsText.Split(new char[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string idStr in ids)
+                {
+                    if (int.TryParse(idStr.Trim(), out int id))
+                    {
+                        targetMobIds.Add(id);
+                    }
+                }
             }
 
             killedMobCount = 0;
             isAttacking = true;
             currentTarget = null;
+            enableLootCollection = chkLootCollection.Checked;
+            enableAutoHeal = chkAutoHeal.Checked;
 
             btnStart.Enabled = false;
             btnStop.Enabled = true;
-            txtMobCount.Enabled = false;
+            chkLootCollection.Enabled = false;
+            chkAutoHeal.Enabled = false;
+            txtMobIds.Enabled = false;
 
-            // Запускаем таймер атаки
-            if (attackTimer == null)
+            if (targetMobIds.Count > 0)
             {
-                attackTimer = new Timer
-                {
-                    Interval = 500 // Проверяем каждые 500мс
-                };
-                attackTimer.Tick += AttackTimer_Tick;
+                AddLog($"Старт атаки. Целевые ID: {string.Join(", ", targetMobIds)}");
             }
-            attackTimer.Start();
+            else
+            {
+                AddLog("Старт атаки. Атакуем всех мобов (ID не указаны)");
+            }
 
-            UpdateStatus($"Атака начата. Цель: убить {targetMobCount} мобов", Color.Lime);
+            // Сканируем адреса мобов только 1 раз при старте (список статичный)
+            if (!addressesScanned || cachedMobAddresses.Count == 0)
+            {
+                UpdateStatus("Сканирование памяти...", Color.Yellow);
+                Application.DoEvents(); // Обновляем UI
+
+                // Запускаем сканирование в отдельном потоке, чтобы не блокировать UI
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    var cfg = GetCurrentOffsets();
+                    var addresses = ScanMemoryForValue(cfg.MobSignature);
+                    
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        cachedMobAddresses = addresses;
+                        addressesScanned = true;
+                        
+                        if (cachedMobAddresses.Count > 0)
+                        {
+                            UpdateStatus($"Найдено адресов мобов: {cachedMobAddresses.Count}. Атака начата!", Color.Lime);
+                            AddLog($"Найдено адресов мобов: {cachedMobAddresses.Count}");
+                            
+                            // Запускаем таймер атаки
+                            if (attackTimer == null)
+                            {
+                                attackTimer = new Timer
+                                {
+                                    Interval = 500 // Проверяем каждые 500мс
+                                };
+                                attackTimer.Tick += AttackTimer_Tick;
+                            }
+                            attackTimer.Start();
+                        }
+                        else
+                        {
+                            UpdateStatus("Мобы не найдены. Проверьте игру.", Color.Red);
+                            AddLog("ОШИБКА: Мобы не найдены при сканировании!");
+                            btnStart.Enabled = true;
+                            btnStop.Enabled = false;
+                            chkLootCollection.Enabled = true;
+                            chkAutoHeal.Enabled = true;
+                            txtMobIds.Enabled = true;
+                            isAttacking = false;
+                        }
+                    });
+                });
+            }
+            else
+            {
+                // Адреса уже отсканированы, сразу запускаем атаку
+                UpdateStatus($"Атака начата! Найдено адресов: {cachedMobAddresses.Count}", Color.Lime);
+                AddLog($"Используются кэшированные адреса: {cachedMobAddresses.Count}");
+                
+                if (attackTimer == null)
+                {
+                    attackTimer = new Timer
+                    {
+                        Interval = 500
+                    };
+                    attackTimer.Tick += AttackTimer_Tick;
+                }
+                attackTimer.Start();
+            }
         }
 
         private void BtnStop_Click(object sender, EventArgs e)
@@ -833,14 +1355,16 @@ namespace stats
 
             btnStart.Enabled = true;
             btnStop.Enabled = false;
-            txtMobCount.Enabled = true;
+            chkLootCollection.Enabled = true;
+            chkAutoHeal.Enabled = true;
+            txtMobIds.Enabled = true;
 
-            // Сбрасываем цель
+            // Сбрасываем цель (но не очищаем кэш адресов - они статичные)
             ClearTarget();
 
-            UpdateStatus($"Атака остановлена. Убито: {killedMobCount} / {targetMobCount}", Color.Orange);
-            lblTargetName.Text = "---";
-            lblKilledCount.Text = $"Убито: {killedMobCount} / {targetMobCount}";
+            UpdateStatus($"Атака остановлена. Убито мобов: {killedMobCount}", Color.Orange);
+            lblKilledCount.Text = $"Убито: {killedMobCount}";
+            AddLog($"Атака остановлена. Всего убито: {killedMobCount}");
         }
 
         private void AttackTimer_Tick(object sender, EventArgs e)
@@ -854,54 +1378,129 @@ namespace stats
             // Проверяем, есть ли текущая цель и жива ли она
             if (currentTarget.HasValue)
             {
-                // Обновляем данные текущей цели
-                var playerData = ReadPlayerData();
-                var mobs = ReadMobList();
-                var targetMob = mobs.FirstOrDefault(m => m.UniqueID == currentTarget.Value.UniqueID);
-
-                if (!targetMob.IsValid || targetMob.HP <= 0)
+                // Находим адрес текущей цели в кэше
+                IntPtr? targetAddr = null;
+                foreach (var addr in cachedMobAddresses)
                 {
-                    // Моб убит
-                    killedMobCount++;
-                    currentTarget = null;
-                    ClearTarget();
-
-                    lblKilledCount.Text = $"Убито: {killedMobCount} / {targetMobCount}";
-
-                    if (killedMobCount >= targetMobCount)
+                    var mob = ReadMobByAddress(addr);
+                    if (mob.HasValue && mob.Value.UniqueID == currentTarget.Value.UniqueID)
                     {
-                        // Достигли цели
-                        StopAttack();
-                        UpdateStatus($"Атака завершена! Убито: {killedMobCount} мобов", Color.Lime);
+                        targetAddr = addr;
+                        break;
+                    }
+                }
+
+                if (targetAddr != null && targetAddr.Value != IntPtr.Zero)
+                {
+                    // Читаем данные текущей цели напрямую (без полного сканирования)
+                    var targetMob = ReadMobByAddress(targetAddr.Value);
+
+                    if (!targetMob.HasValue || targetMob.Value.HP <= 0)
+                    {
+                        // Моб убит
+                        int killedMobId = currentTarget.Value.ID;
+                        string mobName = GetMobName(killedMobId);
+                        
+                        killedMobCount++;
+                        currentTarget = null;
+                        ClearTarget();
+
+                        AddLog($"Моб убит: {mobName} (ID: {killedMobId})");
+
+                        // Отправляем клавишу E для сбора лута, если включено
+                        if (enableLootCollection)
+                        {
+                            AddLog($"Сбор лута (E) - enableLootCollection = {enableLootCollection}");
+                            SendKeyEToGame(2);
+                            SendKeyEToGame(2);
+                        }
+                        else
+                        {
+                            AddLog($"Сбор лута пропущен - enableLootCollection = {enableLootCollection}");
+                        }
+
+                        // Автохил после убийства моба, если включено
+                        if (enableAutoHeal)
+                        {
+                            AutoHeal();
+                        }
+
+                        lblKilledCount.Text = $"Убито: {killedMobCount}";
+                    }
+                    else
+                    {
+                        // Продолжаем атаковать текущую цель
                         return;
                     }
                 }
                 else
                 {
-                    // Обновляем имя цели
-                    lblTargetName.Text = GetMobName(targetMob.ID);
-                    return; // Продолжаем атаковать текущую цель
+                    // Адрес не найден в кэше - моб исчез (убит или деспавнился)
+                    int killedMobId = currentTarget.Value.ID;
+                    string mobName = GetMobName(killedMobId);
+                    
+                    killedMobCount++;
+                    currentTarget = null;
+                    ClearTarget();
+
+                    AddLog($"Моб убит (исчез из памяти): {mobName} (ID: {killedMobId})");
+
+                    // Отправляем клавишу E для сбора лута, если включено
+                    if (enableLootCollection)
+                    {
+                        AddLog($"Сбор лута (E)");
+                        SendKeyEToGame(2);
+                        SendKeyEToGame(2);
+                    }
+
+                    // Автохил после убийства моба, если включено
+                    if (enableAutoHeal)
+                    {
+                        AutoHeal();
+                    }
+
+                    lblKilledCount.Text = $"Убито: {killedMobCount}";
                 }
             }
 
-            // Ищем новую цель
+            // Ищем новую цель из кэшированного списка адресов
             var player = ReadPlayerData();
             if (!player.IsValid)
             {
                 return;
             }
 
+            // Используем кэшированные адреса (не сканируем заново)
             var nearestMob = FindNearestMob(player);
             if (nearestMob.HasValue && nearestMob.Value.HP > 0)
             {
+                // Находим адрес моба по UniqueID
+                IntPtr mobAddr = IntPtr.Zero;
+                var cfg = GetCurrentOffsets();
+                foreach (var addr in cachedMobAddresses)
+                {
+                    long uniqueId = ReadInt64(IntPtr.Add(addr, cfg.MobUniqueIdOffset));
+                    if (uniqueId == nearestMob.Value.UniqueID)
+                    {
+                        mobAddr = addr;
+                        break;
+                    }
+                }
+                
                 // Атакуем нового моба
                 currentTarget = nearestMob;
                 AttackMob(nearestMob.Value);
-                lblTargetName.Text = GetMobName(nearestMob.Value.ID);
+                string mobName = GetMobName(nearestMob.Value.ID);
+                string uniqueId2Info = nearestMob.Value.UniqueID2 > 0 ? $", UniqueID2: {nearestMob.Value.UniqueID2}" : "";
+                AddLog($"Атака: {mobName} (ID: {nearestMob.Value.ID}, HP: {nearestMob.Value.HP}, UniqueID: {nearestMob.Value.UniqueID}{uniqueId2Info}, Адрес: {mobAddr.ToInt64():X})");
             }
             else
             {
-                lblTargetName.Text = "Цель не найдена";
+                // Цель не найдена - логируем только периодически, чтобы не спамить
+                if (DateTime.Now.Second % 5 == 0) // Раз в 5 секунд
+                {
+                    AddLog("Цель не найдена. Ожидание...");
+                }
             }
         }
 
@@ -912,17 +1511,42 @@ namespace stats
                 IntPtr moduleBase = GetModuleBaseAddress("R2Client.exe");
                 if (moduleBase == IntPtr.Zero) return;
 
-                // Вычисляем адрес указателя персонажа
-                IntPtr basePtrAddress = IntPtr.Add(moduleBase, PLAYER_BASE_OFFSET);
-                IntPtr playerBase = ReadPointer(basePtrAddress);
+                IntPtr playerBase = GetPlayerBaseAddress(moduleBase);
                 if (playerBase == IntPtr.Zero) return;
 
-                // Записываем уникальный ID моба в TARGET
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_TARGET_OFFSET), mob.UniqueID);
+                var cfg = GetCurrentOffsets();
 
-                // Записываем значения для атаки
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_AUTO_ATTACK_SET1_OFFSET), 3);
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_AUTO_ATTACK_SET2_OFFSET), 65536);
+                // Записываем уникальный ID моба в TARGET (приводим long к int, так как WriteInt32 принимает int)
+                IntPtr targetAddr = IntPtr.Add(playerBase, cfg.TargetOffset);
+                WriteInt32(targetAddr, (int)mob.UniqueID);
+                AddLog($"[АТАКА] Target адрес: {targetAddr.ToInt64():X} (offset {cfg.TargetOffset:X}), записано UniqueID: {mob.UniqueID}");
+
+                // Для TW сервера записываем второе уникальное ID
+                if (cfg.TargetOffset2 > 0 && mob.UniqueID2 > 0)
+                {
+                    IntPtr targetAddr2 = IntPtr.Add(playerBase, cfg.TargetOffset2);
+                    WriteInt32(targetAddr2, mob.UniqueID2);
+                    AddLog($"[АТАКА] Target2 адрес: {targetAddr2.ToInt64():X} (offset {cfg.TargetOffset2:X}), записано UniqueID2: {mob.UniqueID2}");
+                }
+
+                // Записываем значения для атаки (разные для разных серверов)
+                IntPtr attack1Addr = IntPtr.Add(playerBase, cfg.AttackSet1Offset);
+                IntPtr attack2Addr = IntPtr.Add(playerBase, cfg.AttackSet2Offset);
+                
+                // Читаем текущие значения перед записью
+                int currentValue1 = ReadInt32(attack1Addr);
+                int currentValue2 = ReadInt32(attack2Addr);
+                
+                WriteInt32(attack1Addr, cfg.AttackValue1);
+                WriteInt32(attack2Addr, cfg.AttackValue2);
+                
+                // Проверяем, что записалось
+                int writtenValue1 = ReadInt32(attack1Addr);
+                int writtenValue2 = ReadInt32(attack2Addr);
+                
+                AddLog($"[АТАКА] Attack1 адрес: {attack1Addr.ToInt64():X} (offset {cfg.AttackSet1Offset:X}), было: {currentValue1}, записано: {cfg.AttackValue1}, прочитано: {writtenValue1}");
+                AddLog($"[АТАКА] Attack2 адрес: {attack2Addr.ToInt64():X} (offset {cfg.AttackSet2Offset:X}), было: {currentValue2}, записано: {cfg.AttackValue2}, прочитано: {writtenValue2}");
+                AddLog($"[АТАКА] PlayerBase: {playerBase.ToInt64():X}, сервер: {selectedServer}");
             }
             catch
             {
@@ -937,18 +1561,74 @@ namespace stats
                 IntPtr moduleBase = GetModuleBaseAddress("R2Client.exe");
                 if (moduleBase == IntPtr.Zero) return;
 
-                IntPtr basePtrAddress = IntPtr.Add(moduleBase, PLAYER_BASE_OFFSET);
-                IntPtr playerBase = ReadPointer(basePtrAddress);
+                IntPtr playerBase = GetPlayerBaseAddress(moduleBase);
                 if (playerBase == IntPtr.Zero) return;
 
+                var cfg = GetCurrentOffsets();
+
                 // Сбрасываем цель
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_TARGET_OFFSET), 0);
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_AUTO_ATTACK_SET1_OFFSET), 0);
-                WriteInt32(IntPtr.Add(playerBase, PLAYER_AUTO_ATTACK_SET2_OFFSET), 0);
+                WriteInt32(IntPtr.Add(playerBase, cfg.TargetOffset), 0);
+                
+                // Для TW сервера сбрасываем второй таргет
+                if (cfg.TargetOffset2 > 0)
+                {
+                    WriteInt32(IntPtr.Add(playerBase, cfg.TargetOffset2), 0);
+                }
+                
+                // Возвращаем значения в состояние "не в бою" (разные для разных серверов)
+                WriteInt32(IntPtr.Add(playerBase, cfg.AttackSet1Offset), cfg.ResetValue1);
+                WriteInt32(IntPtr.Add(playerBase, cfg.AttackSet2Offset), cfg.ResetValue2);
             }
             catch
             {
                 // Игнорируем ошибки
+            }
+        }
+
+        private void BtnCopyLogs_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (listBoxLogs == null || listBoxLogs.Items.Count == 0)
+                {
+                    return;
+                }
+
+                // Если выбраны элементы, копируем только их, иначе все
+                if (listBoxLogs.SelectedItems.Count > 0)
+                {
+                    var selectedText = new System.Text.StringBuilder();
+                    foreach (var item in listBoxLogs.SelectedItems)
+                    {
+                        selectedText.AppendLine(item.ToString());
+                    }
+                    Clipboard.SetText(selectedText.ToString());
+                    AddLog($"Скопировано {listBoxLogs.SelectedItems.Count} строк в буфер обмена");
+                }
+                else
+                {
+                    // Копируем все логи
+                    var allText = new System.Text.StringBuilder();
+                    for (int i = listBoxLogs.Items.Count - 1; i >= 0; i--)
+                    {
+                        allText.AppendLine(listBoxLogs.Items[i].ToString());
+                    }
+                    Clipboard.SetText(allText.ToString());
+                    AddLog($"Скопировано {listBoxLogs.Items.Count} строк в буфер обмена");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Ошибка при копировании логов: {ex.Message}");
+            }
+        }
+
+        private void BtnClearLogs_Click(object sender, EventArgs e)
+        {
+            if (listBoxLogs != null)
+            {
+                listBoxLogs.Items.Clear();
+                AddLog("Логи очищены");
             }
         }
 
@@ -988,7 +1668,8 @@ namespace stats
     {
         public bool IsValid;
         public int ID;
-        public int UniqueID;
+        public long UniqueID; // int64 для правильного отображения
+        public int UniqueID2; // Второе уникальное ID (только для TW)
         public int HP;
         public float X;
         public float Y;

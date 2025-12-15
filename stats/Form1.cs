@@ -22,6 +22,9 @@ namespace stats
         private bool enableLootCollection = false;
         private bool enableAutoHeal = false;
         private bool enableBuff = false;
+        private bool isLooting = false; // Флаг процесса сбора лута
+        private DateTime lootStartTime = DateTime.MinValue; // Время начала сбора лута
+        private Random random = new Random(); // Генератор случайных чисел для задержек
         
         // Кэш для списка мобов (адреса статичные, сканируем только 1 раз при старте)
         private bool addressesScanned = false;
@@ -30,6 +33,9 @@ namespace stats
         // Labels для персонажа
         private Label lblPlayerHP;
         private Label lblPlayerMP;
+        
+        // Label для моба
+        private Label lblMobHP;
 
         // Label для статуса
         private Label lblStatus;
@@ -64,7 +70,7 @@ namespace stats
         {
             //название окна не менять
             this.Text = "Stats";
-            this.Size = new Size(770, 780);
+            this.Size = new Size(790, 800);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -108,6 +114,18 @@ namespace stats
             this.Controls.Add(lblPlayerMP);
             yPos += 40;
 
+            // HP моба
+            lblMobHP = new Label
+            {
+                Text = "Моб HP: ---",
+                ForeColor = Color.Orange,
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(30, yPos)
+            };
+            this.Controls.Add(lblMobHP);
+            yPos += 40;
+
             // Выбор сервера
             Label lblServer = new Label
             {
@@ -131,6 +149,7 @@ namespace stats
             };
             cmbServer.Items.Add("default");
             cmbServer.Items.Add("tw");
+            cmbServer.Items.Add("pn");
             cmbServer.SelectedIndex = 0;
             cmbServer.SelectedIndexChanged += CmbServer_SelectedIndexChanged;
             this.Controls.Add(cmbServer);
@@ -334,10 +353,14 @@ namespace stats
             if (gameProcess == null || gameProcess.HasExited)
             {
                 connectionLogged = false; // Сбрасываем флаг при потере подключения
-                Process[] processes = Process.GetProcessesByName("R2Client");
+                
+                // Определяем имя процесса в зависимости от выбранного сервера
+                string targetProcessName = GetProcessNameForServer(selectedServer);
+                Process[] processes = Process.GetProcessesByName(targetProcessName);
+                
                 if (processes.Length == 0)
                 {
-                    UpdateStatus("Игра не найдена", Color.Red);
+                    UpdateStatus($"Игра не найдена ({targetProcessName})", Color.Red);
                     ClearAllData();
                     gameController?.Close();
                     gameController = null;
@@ -363,12 +386,13 @@ namespace stats
             // Обновляем сервер, если изменился
             gameController.SetServer(selectedServer);
 
-            UpdateStatus($"Подключено: R2Client.exe (PID: {gameProcess.Id})", Color.Lime);
+            string processName = GetProcessNameForServer(selectedServer);
+            UpdateStatus($"Подключено: {processName}.exe (PID: {gameProcess.Id})", Color.Lime);
             
             // Логируем подключение только один раз
             if (!connectionLogged)
             {
-                AddLog($"Подключено к процессу R2Client.exe (PID: {gameProcess.Id})");
+                AddLog($"Подключено к процессу {processName}.exe (PID: {gameProcess.Id})");
                 connectionLogged = true;
             }
 
@@ -390,6 +414,7 @@ namespace stats
         {
             lblPlayerHP.Text = "HP: ---";
             lblPlayerMP.Text = "MP: ---";
+            lblMobHP.Text = "Моб HP: ---";
         }
 
         private void UpdatePlayerData(PlayerData data)
@@ -445,8 +470,23 @@ namespace stats
                 {
                     gameController.SetServer(selectedServer);
                 }
+                // Сбрасываем подключение, чтобы переподключиться к правильному процессу
+                connectionLogged = false;
+                gameController?.Close();
+                gameController = null;
+                gameProcess = null;
                 AddLog($"Выбран сервер: {selectedServer}");
             }
+        }
+
+        private string GetProcessNameForServer(string server)
+        {
+            if (server == "pn")
+                return ServerOffsets.Pn.ProcessName;
+            else if (server == "tw")
+                return ServerOffsets.Tw.ProcessName;
+            else
+                return ServerOffsets.Default.ProcessName;
         }
 
 
@@ -655,6 +695,21 @@ namespace stats
                 return;
             }
 
+            // Если идет сбор лута, не начинаем новую атаку
+            if (isLooting)
+            {
+                // Проверяем, прошло ли достаточно времени для сбора лута (2 нажатия * 0.7 сек = 1.4 секунды + буфер)
+                if ((DateTime.Now - lootStartTime).TotalSeconds >= 3.5) // Wait 3.5s
+                {
+                    isLooting = false;
+                    AddLog("Сбор лута завершен, продолжаем атаку");
+                }
+                else
+                {
+                    return; // Ждем завершения сбора лута
+                }
+            }
+
             // Проверяем HP и лечим в процессе атаки, если включено
             if (enableAutoHeal)
             {
@@ -672,9 +727,19 @@ namespace stats
                     // Читаем данные текущей цели напрямую (без полного сканирования)
                     var targetMob = gameController.ReadMobByAddress(targetAddr.Value);
 
-                    if (!targetMob.HasValue || targetMob.Value.HP <= 0)
+                    // Обновляем отображение HP моба и проверяем, жив ли моб
+                    if (targetMob.HasValue && targetMob.Value.HP > 0)
                     {
-                        // Моб убит
+                        // Моб жив - обновляем отображение и продолжаем атаковать
+                        lblMobHP.Text = $"Моб HP: {targetMob.Value.HP}";
+                        lblMobHP.ForeColor = Color.Orange;
+                        return; // Продолжаем атаковать текущую цель
+                    }
+                    else
+                    {
+                        // HP = 0 или моб не найден - моб убит
+                        lblMobHP.Text = "Моб HP: 0";
+                        
                         int killedMobId = currentTarget.Value.ID;
                         string mobName = gameController.GetMobName(killedMobId);
                         
@@ -684,23 +749,41 @@ namespace stats
 
                         AddLog($"Моб убит: {mobName} (ID: {killedMobId})");
 
-                    // Отправляем клавишу E для сбора лута, если включено
-                    if (enableLootCollection)
-                    {
-                        KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
-                    }
-
-                    lblKilledCount.Text = $"Убито: {killedMobCount}";
-                    }
-                    else
-                    {
-                        // Продолжаем атаковать текущую цель
+                        lblKilledCount.Text = $"Убито: {killedMobCount}";
+                        
+                        // Отправляем клавишу E для сбора лута, если включено (синхронно, до поиска новой цели)
+                        if (enableLootCollection)
+                        {
+                            isLooting = true;
+                            lootStartTime = DateTime.Now;
+                            AddLog("Начинаем сбор лута...");
+                            // Выполняем сбор лута синхронно, чтобы не начинать атаку следующего моба
+                            KeyboardHelper.SendKeyE(gameProcess, 4, AddLog);
+                            // Ждем завершения сбора лута (2 нажатия * 0.7 сек + буфер)
+                            System.Threading.Thread.Sleep(1000); // Дополнительная пауза для завершения
+                            isLooting = false;
+                            AddLog("Сбор лута завершен");
+                        }
+                        
+                        // Добавляем случайную задержку 0.1-0.5 сек перед поиском нового моба
+                        int delayMs = random.Next(100, 501); // 100-500 мс
+                        System.Threading.Thread.Sleep(delayMs);
+                        
+                        // После сбора лута и задержки - выходим, следующая итерация найдет новую цель
                         return;
                     }
                 }
                 else
                 {
-                    // Адрес не найден - моб исчез (убит или деспавнился)
+                    // Адрес не найден - проверяем HP из currentTarget
+                    // Если HP > 0, продолжаем искать этот моб, иначе считаем убитым
+                    if (currentTarget.HasValue && currentTarget.Value.HP > 0)
+                    {
+                        // Моб еще может быть жив, но адрес временно не найден - продолжаем атаковать
+                        return;
+                    }
+                    
+                    // Моб убит (HP был 0)
                     int killedMobId = currentTarget.Value.ID;
                     string mobName = gameController.GetMobName(killedMobId);
                     
@@ -709,14 +792,30 @@ namespace stats
                     gameController.ClearTarget();
 
                     AddLog($"Моб убит (исчез из памяти): {mobName} (ID: {killedMobId})");
-
-                    // Отправляем клавишу E для сбора лута, если включено
+                    
+                    lblMobHP.Text = "Моб HP: ---";
+                    lblKilledCount.Text = $"Убито: {killedMobCount}";
+                    
+                    // Отправляем клавишу E для сбора лута, если включено (синхронно, до поиска новой цели)
                     if (enableLootCollection)
                     {
+                        isLooting = true;
+                        lootStartTime = DateTime.Now;
+                        AddLog("Начинаем сбор лута...");
+                        // Выполняем сбор лута синхронно, чтобы не начинать атаку следующего моба
                         KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
+                        // Ждем завершения сбора лута (2 нажатия * 0.7 сек + буфер)
+                        System.Threading.Thread.Sleep(2000); // Дополнительная пауза для завершения
+                        isLooting = false;
+                        AddLog("Сбор лута завершен");
                     }
-
-                    lblKilledCount.Text = $"Убито: {killedMobCount}";
+                    
+                    // Добавляем случайную задержку 0.1-0.5 сек перед поиском нового моба
+                    int delayMs = random.Next(100, 501); // 100-500 мс
+                    System.Threading.Thread.Sleep(delayMs);
+                    
+                    // После сбора лута и задержки - выходим, следующая итерация найдет новую цель
+                    return;
                 }
             }
 
@@ -733,13 +832,21 @@ namespace stats
                 // Находим адрес моба по UniqueID
                 var mobAddr = gameController.FindMobAddressByUniqueId(nearestMob.Value.UniqueID);
                 
+                // Добавляем случайную задержку 0.1-0.5 сек перед началом атаки нового моба
+                int delayMs = random.Next(100, 501); // 100-500 мс
+                System.Threading.Thread.Sleep(delayMs);
+                
                 // Атакуем нового моба
                 currentTarget = nearestMob;
                 gameController.AttackMob(nearestMob.Value);
+                
+                // Обновляем отображение HP моба
+                lblMobHP.Text = $"Моб HP: {nearestMob.Value.HP}";
+                lblMobHP.ForeColor = Color.Orange;
+                
                 string mobName = gameController.GetMobName(nearestMob.Value.ID);
-                string uniqueId2Info = nearestMob.Value.UniqueID2 > 0 ? $", UniqueID2: {nearestMob.Value.UniqueID2}" : "";
                 string addrInfo = mobAddr.HasValue ? mobAddr.Value.ToInt64().ToString("X") : "N/A";
-                AddLog($"Атака: {mobName} (ID: {nearestMob.Value.ID}, HP: {nearestMob.Value.HP}, UniqueID: {nearestMob.Value.UniqueID}{uniqueId2Info}, Адрес: {addrInfo})");
+                AddLog($"Атака: {mobName} (ID: {nearestMob.Value.ID}, HP: {nearestMob.Value.HP}, UniqueID: {nearestMob.Value.UniqueID}, Адрес: {addrInfo})");
             }
             else
             {

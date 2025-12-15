@@ -34,7 +34,9 @@ namespace stats
                 IntPtr hWnd = gameProcess.MainWindowHandle;
                 if (hWnd == IntPtr.Zero)
                 {
-                    Process[] processes = Process.GetProcessesByName("R2Client");
+                    // Пробуем найти процесс по имени
+                    string processName = gameProcess.ProcessName;
+                    Process[] processes = Process.GetProcessesByName(processName);
                     if (processes.Length > 0)
                     {
                         hWnd = processes[0].MainWindowHandle;
@@ -50,11 +52,13 @@ namespace stats
                 for (int i = 0; i < count; i++)
                 {
                     SendKeyPress(hWnd, WinAPI.VK_E);
+                    logCallback?.Invoke($"Сбор лута: нажатие E {i + 1}/{count}");
                     if (i < count - 1)
                     {
-                        System.Threading.Thread.Sleep(700); // Пауза 0.7 сек между нажатиями
+                        System.Threading.Thread.Sleep(500); // Пауза 0.7 сек между нажатиями
                     }
                 }
+                logCallback?.Invoke($"Сбор лута завершен: отправлено {count} нажатий E");
             }
             catch (Exception ex)
             {
@@ -74,7 +78,9 @@ namespace stats
                 IntPtr hWnd = gameProcess.MainWindowHandle;
                 if (hWnd == IntPtr.Zero)
                 {
-                    Process[] processes = Process.GetProcessesByName("R2Client");
+                    // Пробуем найти процесс по имени
+                    string processName = gameProcess.ProcessName;
+                    Process[] processes = Process.GetProcessesByName(processName);
                     if (processes.Length > 0)
                     {
                         hWnd = processes[0].MainWindowHandle;
@@ -106,7 +112,9 @@ namespace stats
                 IntPtr hWnd = gameProcess.MainWindowHandle;
                 if (hWnd == IntPtr.Zero)
                 {
-                    Process[] processes = Process.GetProcessesByName("R2Client");
+                    // Пробуем найти процесс по имени
+                    string processName = gameProcess.ProcessName;
+                    Process[] processes = Process.GetProcessesByName(processName);
                     if (processes.Length > 0)
                     {
                         hWnd = processes[0].MainWindowHandle;

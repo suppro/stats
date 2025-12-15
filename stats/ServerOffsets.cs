@@ -2,10 +2,11 @@ namespace stats
 {
     public class ServerOffsets
     {
+        public string ProcessName; // Имя процесса (R2Client или PNGame)
         public int BaseOffset;
         public bool UseFirstPointer;
         public int FirstPointerOffset;
-        public bool UseSecondPointer; // Для TW: нужно читать указатель дважды
+        public bool UseSecondPointer; // Для TW и PN: нужно читать указатель дважды
         public int HpOffset;
         public int MpOffset;
         public int XOffset;
@@ -22,17 +23,16 @@ namespace stats
         public int MobYOffset;
         public int MobZOffset;
         public int MobUniqueIdOffset;
-        public int MobUniqueId2Offset; // Второе уникальное ID (только для TW)
-        public int TargetOffset2; // Второй офсет для таргета (только для TW)
-        // Значения для атаки (для default: set1=3, set2=65536; для tw: set1=3, set2=257)
+        // Значения для атаки (set1=3, set2=65536 для обоих серверов)
         public int AttackValue1;
         public int AttackValue2;
-        // Значения для сброса (для default: 0,0; для tw: 65536,0)
+        // Значения для сброса (0,0 для обоих серверов)
         public int ResetValue1;
         public int ResetValue2;
 
         public static readonly ServerOffsets Default = new ServerOffsets
         {
+            ProcessName = "R2Client",
             BaseOffset = 0x01592584,
             UseFirstPointer = false,
             FirstPointerOffset = 0,
@@ -52,8 +52,6 @@ namespace stats
             MobYOffset = 0x1BF4,
             MobZOffset = 0x1BF8,
             MobUniqueIdOffset = 0x98,
-            MobUniqueId2Offset = 0, // Нет второго уникального ID для default
-            TargetOffset2 = 0, // Нет второго таргета для default
             AttackValue1 = 3,
             AttackValue2 = 65536,
             ResetValue1 = 0,
@@ -62,6 +60,7 @@ namespace stats
 
         public static readonly ServerOffsets Tw = new ServerOffsets
         {
+            ProcessName = "R2Client",
             BaseOffset = 0x034182B8,
             UseFirstPointer = true,
             FirstPointerOffset = 0x60,
@@ -83,11 +82,39 @@ namespace stats
             MobYOffset = 0x2AC8,       // 04A6CA88 - 04A69FC0
             MobZOffset = 0x2ACC,       // 04A6CA8C - 04A69FC0
             MobUniqueIdOffset = 0xA8,  // 04A6A068 - 04A69FC0
-            MobUniqueId2Offset = 0,    // Не используем второй UniqueID (как на Default)
-            TargetOffset2 = 0,         // Не используем второй таргет (как на Default)
             AttackValue1 = 3,          // Такие же значения как на Default
             AttackValue2 = 65536,
             ResetValue1 = 0,           // Такие же значения сброса как на Default
+            ResetValue2 = 0
+        };
+
+        public static readonly ServerOffsets Pn = new ServerOffsets
+        {
+            ProcessName = "PNGame",
+            BaseOffset = 0x037BB5C0,
+            UseFirstPointer = true,
+            FirstPointerOffset = 0x60,
+            UseSecondPointer = true, // Для PN: читаем указатель дважды
+            // "PNGame.exe"+037BB5C0 -> указатель -> +60 -> указатель -> +офсеты
+            HpOffset = 0x40,
+            MpOffset = 0x44,
+            XOffset = 0x2D84,
+            YOffset = 0x2D88,
+            ZOffset = 0x2D8C,
+            TargetOffset = 0xAC,
+            AttackSet1Offset = 0x32A4,
+            AttackSet2Offset = 0x32A8,
+            MobSignature = 59719308, // Сигнатура для PN
+            // Офсеты мобов для PN
+            MobIdOffset = 0x0C,
+            MobHpOffset = 0x40,
+            MobXOffset = 0x2D84,
+            MobYOffset = 0x2D88,
+            MobZOffset = 0x2D8C,
+            MobUniqueIdOffset = 0xA8,
+            AttackValue1 = 3,
+            AttackValue2 = 65536,
+            ResetValue1 = 0,
             ResetValue2 = 0
         };
     }

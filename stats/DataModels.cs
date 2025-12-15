@@ -15,7 +15,7 @@ namespace stats
         public bool IsValid;
         public int ID;
         public long UniqueID; // int64 для правильного отображения
-        public int UniqueID2; // Второе уникальное ID (только для TW)
+        public int UniqueID2; // Не используется (оставлено для совместимости)
         public int HP;
         public float X;
         public float Y;

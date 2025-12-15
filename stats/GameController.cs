@@ -25,14 +25,20 @@ namespace stats
 
         public void SetServer(string server)
         {
-            currentOffsets = server == "tw" ? ServerOffsets.Tw : ServerOffsets.Default;
+            if (server == "tw")
+                currentOffsets = ServerOffsets.Tw;
+            else if (server == "pn")
+                currentOffsets = ServerOffsets.Pn;
+            else
+                currentOffsets = ServerOffsets.Default;
         }
 
         public bool IsValid => memoryReader != null && memoryReader.IsValid;
 
         public IntPtr GetPlayerBaseAddress()
         {
-            IntPtr moduleBase = memoryReader.GetModuleBaseAddress("R2Client.exe");
+            string moduleName = currentOffsets.ProcessName + ".exe";
+            IntPtr moduleBase = memoryReader.GetModuleBaseAddress(moduleName);
             if (moduleBase == IntPtr.Zero) return IntPtr.Zero;
 
             IntPtr basePtrAddress = IntPtr.Add(moduleBase, currentOffsets.BaseOffset);
@@ -139,7 +145,7 @@ namespace stats
                             IsValid = true,
                             ID = id,
                             UniqueID = uniqueId,
-                            UniqueID2 = currentOffsets.MobUniqueId2Offset > 0 ? (int)memoryReader.ReadInt64(IntPtr.Add(mobAddr, currentOffsets.MobUniqueId2Offset)) : 0,
+                            UniqueID2 = 0,
                             HP = hp,
                             X = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobXOffset)),
                             Y = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobYOffset)),
@@ -207,7 +213,7 @@ namespace stats
                     IsValid = true,
                     ID = id,
                     UniqueID = uniqueId,
-                    UniqueID2 = currentOffsets.MobUniqueId2Offset > 0 ? (int)memoryReader.ReadInt64(IntPtr.Add(mobAddr, currentOffsets.MobUniqueId2Offset)) : 0,
+                    UniqueID2 = 0,
                     HP = hp,
                     X = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobXOffset)),
                     Y = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobYOffset)),
@@ -257,12 +263,6 @@ namespace stats
                 IntPtr targetAddr = IntPtr.Add(playerBase, currentOffsets.TargetOffset);
                 memoryReader.WriteInt32(targetAddr, (int)mob.UniqueID);
 
-                if (currentOffsets.TargetOffset2 > 0 && mob.UniqueID2 > 0)
-                {
-                    IntPtr targetAddr2 = IntPtr.Add(playerBase, currentOffsets.TargetOffset2);
-                    memoryReader.WriteInt32(targetAddr2, mob.UniqueID2);
-                }
-
                 IntPtr attack1Addr = IntPtr.Add(playerBase, currentOffsets.AttackSet1Offset);
                 IntPtr attack2Addr = IntPtr.Add(playerBase, currentOffsets.AttackSet2Offset);
                 memoryReader.WriteInt32(attack1Addr, currentOffsets.AttackValue1);
@@ -281,11 +281,6 @@ namespace stats
                 if (playerBase == IntPtr.Zero) return;
 
                 memoryReader.WriteInt32(IntPtr.Add(playerBase, currentOffsets.TargetOffset), 0);
-
-                if (currentOffsets.TargetOffset2 > 0)
-                {
-                    memoryReader.WriteInt32(IntPtr.Add(playerBase, currentOffsets.TargetOffset2), 0);
-                }
 
                 memoryReader.WriteInt32(IntPtr.Add(playerBase, currentOffsets.AttackSet1Offset), currentOffsets.ResetValue1);
                 memoryReader.WriteInt32(IntPtr.Add(playerBase, currentOffsets.AttackSet2Offset), currentOffsets.ResetValue2);

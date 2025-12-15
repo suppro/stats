@@ -73,6 +73,7 @@ namespace stats
         const uint KEYEVENTF_KEYUP = 0x0002;
         const ushort VK_E = 0x45;
         const ushort VK_1 = 0x31;
+        const ushort VK_3 = 0x33;
 
         [StructLayout(LayoutKind.Sequential)]
         struct MEMORY_BASIC_INFORMATION
@@ -190,6 +191,7 @@ namespace stats
 
         private Timer updateTimer;
         private Timer attackTimer;
+        private Timer buffTimer;
         private Process gameProcess;
         private IntPtr hProcess;
 
@@ -202,6 +204,7 @@ namespace stats
         private MobData? currentTarget = null;
         private bool enableLootCollection = false;
         private bool enableAutoHeal = false;
+        private bool enableBuff = false;
         
         // Кэш для списка мобов (адреса статичные, сканируем только 1 раз при старте)
         private List<IntPtr> cachedMobAddresses = new List<IntPtr>();
@@ -221,6 +224,7 @@ namespace stats
         private TextBox txtMobIds;
         private CheckBox chkLootCollection;
         private CheckBox chkAutoHeal;
+        private CheckBox chkBuff;
         private Button btnStart;
         private Button btnStop;
         private Button btnCopyLogs;
@@ -390,6 +394,20 @@ namespace stats
                 BackColor = Color.Black
             };
             this.Controls.Add(chkAutoHeal);
+            yPos += 35;
+
+            // Чекбокс бафа
+            chkBuff = new CheckBox
+            {
+                Text = "Баф (клавиша 3 раз в минуту)",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F),
+                AutoSize = true,
+                Location = new Point(30, yPos),
+                BackColor = Color.Black
+            };
+            chkBuff.CheckedChanged += ChkBuff_CheckedChanged;
+            this.Controls.Add(chkBuff);
             yPos += 35;
 
             // Кнопки старт/стоп
@@ -1357,6 +1375,7 @@ namespace stats
             btnStop.Enabled = false;
             chkLootCollection.Enabled = true;
             chkAutoHeal.Enabled = true;
+            chkBuff.Enabled = true;
             txtMobIds.Enabled = true;
 
             // Сбрасываем цель (но не очищаем кэш адресов - они статичные)
@@ -1585,6 +1604,70 @@ namespace stats
             }
         }
 
+        private void ChkBuff_CheckedChanged(object sender, EventArgs e)
+        {
+            enableBuff = chkBuff != null && chkBuff.Checked;
+            
+            if (enableBuff)
+            {
+                // Запускаем таймер для бафа (раз в минуту = 60000 мс)
+                if (buffTimer == null)
+                {
+                    buffTimer = new Timer
+                    {
+                        Interval = 60000 // 1 минута
+                    };
+                    buffTimer.Tick += BuffTimer_Tick;
+                }
+                buffTimer.Start();
+                AddLog("Баф включен (клавиша 3 раз в минуту)");
+            }
+            else
+            {
+                // Останавливаем таймер
+                if (buffTimer != null)
+                {
+                    buffTimer.Stop();
+                }
+                AddLog("Баф выключен");
+            }
+        }
+
+        private void BuffTimer_Tick(object sender, EventArgs e)
+        {
+            if (!enableBuff || gameProcess == null || gameProcess.HasExited)
+            {
+                if (buffTimer != null)
+                {
+                    buffTimer.Stop();
+                }
+                return;
+            }
+
+            try
+            {
+                IntPtr hWnd = gameProcess.MainWindowHandle;
+                if (hWnd == IntPtr.Zero)
+                {
+                    Process[] processes = Process.GetProcessesByName("R2Client");
+                    if (processes.Length > 0)
+                    {
+                        hWnd = processes[0].MainWindowHandle;
+                    }
+                }
+
+                if (hWnd != IntPtr.Zero)
+                {
+                    SendKeyPress(hWnd, VK_3);
+                    AddLog("Баф: нажата клавиша 3");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Ошибка при отправке бафа: {ex.Message}");
+            }
+        }
+
         private void BtnCopyLogs_Click(object sender, EventArgs e)
         {
             try
@@ -1643,6 +1726,12 @@ namespace stats
             {
                 attackTimer.Stop();
                 attackTimer.Dispose();
+            }
+
+            if (buffTimer != null)
+            {
+                buffTimer.Stop();
+                buffTimer.Dispose();
             }
 
             if (hProcess != IntPtr.Zero)

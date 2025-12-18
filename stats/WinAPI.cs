@@ -56,6 +56,7 @@ namespace stats
         public const ushort VK_E = 0x45;
         public const ushort VK_1 = 0x31;
         public const ushort VK_3 = 0x33;
+        public const ushort VK_SHIFT = 0x10;
 
         // Structures
         [StructLayout(LayoutKind.Sequential)]

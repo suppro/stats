@@ -7,7 +7,7 @@
     <ProjectGuid>{A5623B76-31FB-4DE7-BB94-0A4D6785938F}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>stats</RootNamespace>
-    <AssemblyName>stats</AssemblyName>
+    <AssemblyName>SystemMonitor</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

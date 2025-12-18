@@ -8,6 +8,7 @@ namespace stats
         public float X;
         public float Y;
         public float Z;
+        public int PlayerId; // ID персонажа на сервере (для проверки агро)
     }
 
     public struct MobData
@@ -20,5 +21,6 @@ namespace stats
         public float X;
         public float Y;
         public float Z;
+        public int TargetId; // ID цели, на которую атакует моб (0 если не атакует, равно PlayerId если атакует нас)
     }
 }

@@ -12,6 +12,7 @@ namespace stats
         public int XOffset;
         public int YOffset;
         public int ZOffset;
+        public int PlayerIdOffset; // ID персонажа на сервере
         public int TargetOffset;
         public int AttackSet1Offset;
         public int AttackSet2Offset;
@@ -23,6 +24,7 @@ namespace stats
         public int MobYOffset;
         public int MobZOffset;
         public int MobUniqueIdOffset;
+        public int MobTargetIdOffset; // ID цели, на которую атакует моб (0 если не атакует)
         // Значения для атаки (set1=3, set2=65536 для обоих серверов)
         public int AttackValue1;
         public int AttackValue2;
@@ -42,6 +44,7 @@ namespace stats
             XOffset = 0x2B70,
             YOffset = 0x2B74,
             ZOffset = 0x2B78,
+            PlayerIdOffset = 0x98, // ID персонажа на сервере
             TargetOffset = 0x101C,
             AttackSet1Offset = 0x3094,
             AttackSet2Offset = 0x3098,
@@ -52,6 +55,7 @@ namespace stats
             MobYOffset = 0x1BF4,
             MobZOffset = 0x1BF8,
             MobUniqueIdOffset = 0x98,
+            MobTargetIdOffset = 0x9C, // ID цели, на которую атакует моб (0 если не атакует)
             AttackValue1 = 3,
             AttackValue2 = 65536,
             ResetValue1 = 0,
@@ -71,6 +75,7 @@ namespace stats
             XOffset = 0x2AE0,
             YOffset = 0x2AE4,
             ZOffset = 0x2AE8,
+            PlayerIdOffset = 0x98, // TODO: проверить офсет для TW сервера
             TargetOffset = 0xAC,
             AttackSet1Offset = 0x2FE4, // Новые офсеты для атаки
             AttackSet2Offset = 0x2FE8,
@@ -82,6 +87,7 @@ namespace stats
             MobYOffset = 0x2AC8,       // 04A6CA88 - 04A69FC0
             MobZOffset = 0x2ACC,       // 04A6CA8C - 04A69FC0
             MobUniqueIdOffset = 0xA8,  // 04A6A068 - 04A69FC0
+            MobTargetIdOffset = 0x9C,  // TODO: проверить офсет для TW сервера
             AttackValue1 = 3,          // Такие же значения как на Default
             AttackValue2 = 65536,
             ResetValue1 = 0,           // Такие же значения сброса как на Default
@@ -101,6 +107,7 @@ namespace stats
             XOffset = 0x2D84,
             YOffset = 0x2D88,
             ZOffset = 0x2D8C,
+            PlayerIdOffset = 0x98, // TODO: проверить офсет для PN сервера
             TargetOffset = 0xAC,
             AttackSet1Offset = 0x32A4,
             AttackSet2Offset = 0x32A8,
@@ -112,6 +119,7 @@ namespace stats
             MobYOffset = 0x2D88,
             MobZOffset = 0x2D8C,
             MobUniqueIdOffset = 0xA8,
+            MobTargetIdOffset = 0x9C, // TODO: проверить офсет для PN сервера
             AttackValue1 = 3,
             AttackValue2 = 65536,
             ResetValue1 = 0,

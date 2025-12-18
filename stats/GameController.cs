@@ -65,7 +65,7 @@ namespace stats
 
         public PlayerData ReadPlayerData()
         {
-            PlayerData data = new PlayerData { IsValid = false };
+            PlayerData data = new PlayerData { IsValid = false, PlayerId = 0 };
 
             try
             {
@@ -77,6 +77,7 @@ namespace stats
                 data.X = memoryReader.ReadFloat(IntPtr.Add(playerBase, currentOffsets.XOffset));
                 data.Y = memoryReader.ReadFloat(IntPtr.Add(playerBase, currentOffsets.YOffset));
                 data.Z = memoryReader.ReadFloat(IntPtr.Add(playerBase, currentOffsets.ZOffset));
+                data.PlayerId = memoryReader.ReadInt32(IntPtr.Add(playerBase, currentOffsets.PlayerIdOffset));
 
                 if (data.HP > 0 || data.MP > 0 || (data.X != 0f || data.Y != 0f || data.Z != 0f))
                 {
@@ -149,7 +150,8 @@ namespace stats
                             HP = hp,
                             X = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobXOffset)),
                             Y = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobYOffset)),
-                            Z = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobZOffset))
+                            Z = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobZOffset)),
+                            TargetId = memoryReader.ReadInt32(IntPtr.Add(mobAddr, currentOffsets.MobTargetIdOffset))
                         };
 
                         if (mob.X != 0f || mob.Y != 0f || mob.Z != 0f)
@@ -217,7 +219,8 @@ namespace stats
                     HP = hp,
                     X = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobXOffset)),
                     Y = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobYOffset)),
-                    Z = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobZOffset))
+                    Z = memoryReader.ReadFloat(IntPtr.Add(mobAddr, currentOffsets.MobZOffset)),
+                    TargetId = memoryReader.ReadInt32(IntPtr.Add(mobAddr, currentOffsets.MobTargetIdOffset))
                 };
 
                 return mob;
@@ -228,29 +231,96 @@ namespace stats
             }
         }
 
-        public MobData? FindNearestMob(PlayerData player, HashSet<int> targetMobIds)
+        // Найти всех мобов с агро (атакуют игрока)
+        public List<MobData> FindMobsWithAgro(PlayerData player, HashSet<int> targetMobIds)
+        {
+            List<MobData> mobsWithAgro = new List<MobData>();
+            
+            if (!player.IsValid || player.PlayerId <= 0) return mobsWithAgro;
+
+            const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
+            
+            List<MobData> mobs = ReadMobList(targetMobIds);
+            foreach (var mob in mobs)
+            {
+                if (!mob.IsValid || mob.HP <= 0) continue;
+                
+                // Пропускаем мобов с некорректным UniqueID
+                if (mob.UniqueID > MAX_VALID_UNIQUE_ID) continue;
+                
+                // Проверяем агро: если TargetId моба равен PlayerId игрока, значит моб нас атакует
+                if (mob.TargetId == player.PlayerId)
+                {
+                    mobsWithAgro.Add(mob);
+                }
+            }
+
+            // Сортируем по расстоянию
+            mobsWithAgro.Sort((a, b) =>
+            {
+                float distA = CalculateDistance(player.X, player.Y, player.Z, a.X, a.Y, a.Z);
+                float distB = CalculateDistance(player.X, player.Y, player.Z, b.X, b.Y, b.Z);
+                return distA.CompareTo(distB);
+            });
+
+            return mobsWithAgro;
+        }
+
+        public MobData? FindNearestMob(PlayerData player, HashSet<int> targetMobIds, Random random = null)
         {
             if (!player.IsValid) return null;
+
+            const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
 
             List<MobData> mobs = ReadMobList(targetMobIds);
             if (mobs.Count == 0) return null;
 
-            MobData? nearestMob = null;
-            float minDistance = float.MaxValue;
+            // Разделяем мобов на две группы: с агро и без агро
+            List<(MobData mob, float distance)> mobsWithAgro = new List<(MobData, float)>();
+            List<(MobData mob, float distance)> mobsWithoutAgro = new List<(MobData, float)>();
 
             foreach (var mob in mobs)
             {
                 if (!mob.IsValid || mob.HP <= 0) continue;
+                
+                // Пропускаем мобов с некорректным UniqueID
+                if (mob.UniqueID > MAX_VALID_UNIQUE_ID) continue;
 
                 float distance = CalculateDistance(player.X, player.Y, player.Z, mob.X, mob.Y, mob.Z);
-                if (distance < minDistance)
+                
+                // Проверяем агро: если TargetId моба равен PlayerId игрока, значит моб нас атакует
+                if (player.PlayerId > 0 && mob.TargetId == player.PlayerId)
                 {
-                    minDistance = distance;
-                    nearestMob = mob;
+                    mobsWithAgro.Add((mob, distance));
+                }
+                else
+                {
+                    mobsWithoutAgro.Add((mob, distance));
                 }
             }
 
-            return nearestMob;
+            // Приоритет 1: Если есть мобы с агро, выбираем ближайшего из них
+            if (mobsWithAgro.Count > 0)
+            {
+                mobsWithAgro.Sort((a, b) => a.distance.CompareTo(b.distance));
+                return mobsWithAgro[0].mob; // Всегда выбираем ближайшего с агро
+            }
+
+            // Приоритет 2: Если мобов с агро нет, выбираем из обычных мобов
+            if (mobsWithoutAgro.Count == 0) return null;
+
+            mobsWithoutAgro.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+            // Случайное отклонение: 15% случаев выбираем не самого близкого моба
+            // (выбираем из 3 ближайших для реалистичности)
+            if (random != null && mobsWithoutAgro.Count > 1 && random.Next(100) < 15)
+            {
+                int randomIndex = random.Next(0, Math.Min(3, mobsWithoutAgro.Count));
+                return mobsWithoutAgro[randomIndex].mob;
+            }
+
+            // В остальных случаях выбираем ближайшего
+            return mobsWithoutAgro[0].mob;
         }
 
         public void AttackMob(MobData mob)

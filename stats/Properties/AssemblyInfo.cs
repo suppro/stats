@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // Общие сведения об этой сборке предоставляются следующим набором
 // набора атрибутов. Измените значения этих атрибутов для изменения сведений,
 // связанных со сборкой.
-[assembly: AssemblyTitle("stats")]
+[assembly: AssemblyTitle("System Monitor")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("stats")]
+[assembly: AssemblyProduct("System Monitor")]
 [assembly: AssemblyCopyright("Copyright ©  2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]

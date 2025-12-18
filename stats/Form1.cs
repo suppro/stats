@@ -22,9 +22,17 @@ namespace stats
         private bool enableLootCollection = false;
         private bool enableAutoHeal = false;
         private bool enableBuff = false;
+        private bool enableLootHighlight = false; // Подсветка лута (Shift+E)
         private bool isLooting = false; // Флаг процесса сбора лута
         private DateTime lootStartTime = DateTime.MinValue; // Время начала сбора лута
         private Random random = new Random(); // Генератор случайных чисел для задержек
+        
+        // Для периодических пауз (имитация отвлечения)
+        private DateTime lastPauseTime = DateTime.MinValue;
+        private bool isPausing = false; // Флаг активной паузы
+        
+        // Максимальное значение UniqueID для моба (мобы с большим UniqueID пропускаются)
+        private const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
         
         // Кэш для списка мобов (адреса статичные, сканируем только 1 раз при старте)
         private bool addressesScanned = false;
@@ -46,6 +54,7 @@ namespace stats
         private CheckBox chkLootCollection;
         private CheckBox chkAutoHeal;
         private CheckBox chkBuff;
+        private CheckBox chkLootHighlight;
         private Button btnStart;
         private Button btnStop;
         private Button btnCopyLogs;
@@ -68,8 +77,8 @@ namespace stats
 
         private void SetupForm()
         {
-            //название окна не менять
-            this.Text = "Stats";
+            // Изменено название окна для снижения заметности
+            this.Text = "System Monitor";
             this.Size = new Size(790, 800);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -243,6 +252,20 @@ namespace stats
             this.Controls.Add(chkBuff);
             yPos += 35;
 
+            // Чекбокс подсветки лута
+            chkLootHighlight = new CheckBox
+            {
+                Text = "Подсветка лута (Shift+E зажато)",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F),
+                AutoSize = true,
+                Location = new Point(30, yPos),
+                BackColor = Color.Black
+            };
+            chkLootHighlight.CheckedChanged += ChkLootHighlight_CheckedChanged;
+            this.Controls.Add(chkLootHighlight);
+            yPos += 35;
+
             // Кнопки старт/стоп
             btnStart = new Button
             {
@@ -396,6 +419,23 @@ namespace stats
                 connectionLogged = true;
             }
 
+            // Если подсветка лута включена, убеждаемся что клавиши зажаты
+            if (enableLootHighlight)
+            {
+                try
+                {
+                    IntPtr hWnd = gameProcess.MainWindowHandle;
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        KeyboardHelper.PressShiftE(hWnd);
+                    }
+                }
+                catch
+                {
+                    // Игнорируем ошибки
+                }
+            }
+
             // Читаем данные персонажа
             if (gameController != null)
             {
@@ -516,7 +556,9 @@ namespace stats
                     while (playerData.HP <= 120 && attempts < maxHealAttempts)
                     {
                         KeyboardHelper.SendKey1(gameProcess);
-                        System.Threading.Thread.Sleep(500); // Пауза 0.5 сек между нажатиями
+                        // Случайная задержка между нажатиями: 450-550мс (±10%)
+                        int healDelay = 450 + random.Next(0, 101);
+                        System.Threading.Thread.Sleep(healDelay);
 
                         // Обновляем данные персонажа
                         playerData = gameController.ReadPlayerData();
@@ -572,6 +614,8 @@ namespace stats
             btnStop.Enabled = true;
             chkLootCollection.Enabled = false;
             chkAutoHeal.Enabled = false;
+            chkBuff.Enabled = false;
+            chkLootHighlight.Enabled = false;
             txtMobIds.Enabled = false;
 
             if (targetMobIds.Count > 0)
@@ -607,15 +651,14 @@ namespace stats
                         {
                             UpdateStatus($"Атака начата!", Color.Lime);
                             
-                            // Запускаем таймер атаки
+                            // Запускаем таймер атаки с случайным интервалом
                             if (attackTimer == null)
                             {
-                                attackTimer = new Timer
-                                {
-                                    Interval = 500 // Проверяем каждые 500мс
-                                };
+                                attackTimer = new Timer();
                                 attackTimer.Tick += AttackTimer_Tick;
                             }
+                            // Случайный интервал: 450-550мс (±10%)
+                            attackTimer.Interval = 450 + random.Next(0, 101);
                             attackTimer.Start();
                         }
                         else
@@ -641,12 +684,11 @@ namespace stats
                 
                 if (attackTimer == null)
                 {
-                    attackTimer = new Timer
-                    {
-                        Interval = 500
-                    };
+                    attackTimer = new Timer();
                     attackTimer.Tick += AttackTimer_Tick;
                 }
+                // Случайный интервал: 450-550мс (±10%)
+                attackTimer.Interval = 450 + random.Next(0, 101);
                 attackTimer.Start();
             }
         }
@@ -671,6 +713,7 @@ namespace stats
             chkLootCollection.Enabled = true;
             chkAutoHeal.Enabled = true;
             chkBuff.Enabled = true;
+            chkLootHighlight.Enabled = true;
             txtMobIds.Enabled = true;
 
             // Сбрасываем цель (но не очищаем кэш адресов - они статичные)
@@ -695,6 +738,25 @@ namespace stats
                 return;
             }
 
+            // Периодические паузы (имитация отвлечения игрока)
+            // Каждые 10-15 минут делаем паузу на 10-30 секунд
+            if (!isPausing && (DateTime.Now - lastPauseTime).TotalMinutes >= 10 + random.Next(0, 6))
+            {
+                isPausing = true;
+                int pauseDuration = 10000 + random.Next(0, 20001); // 10-30 секунд
+                AddLog($"Пауза (имитация отвлечения): {pauseDuration / 1000} сек");
+                System.Threading.Thread.Sleep(pauseDuration);
+                lastPauseTime = DateTime.Now;
+                isPausing = false;
+                AddLog("Пауза завершена, продолжаем");
+            }
+
+            // Обновляем интервал таймера с случайной вариацией для следующей итерации
+            if (attackTimer != null)
+            {
+                attackTimer.Interval = 450 + random.Next(0, 101); // 450-550мс
+            }
+
             // Если идет сбор лута, не начинаем новую атаку
             if (isLooting)
             {
@@ -716,6 +778,28 @@ namespace stats
                 AutoHeal();
             }
 
+            // Сначала проверяем, есть ли мобы с агро (приоритет выше текущей цели)
+            PlayerData player = gameController.ReadPlayerData();
+            if (player.IsValid && player.PlayerId > 0)
+            {
+                var mobsWithAgro = gameController.FindMobsWithAgro(player, targetMobIds);
+                if (mobsWithAgro.Count > 0 && (!currentTarget.HasValue || mobsWithAgro[0].UniqueID != currentTarget.Value.UniqueID))
+                {
+                    // Есть мобы с агро и текущая цель не среди них - переключаемся на ближайшего с агро
+                    var nearestAgroMob = mobsWithAgro[0];
+                    currentTarget = nearestAgroMob;
+                    var mobAddr = gameController.FindMobAddressByUniqueId(nearestAgroMob.UniqueID);
+                    gameController.AttackMob(nearestAgroMob);
+                    
+                    lblMobHP.Text = $"Моб HP: {nearestAgroMob.HP} [АГРО]";
+                    lblMobHP.ForeColor = Color.Red;
+                    
+                    string mobName = gameController.GetMobName(nearestAgroMob.ID);
+                    AddLog($"Переключение на моба с агро: {mobName} (ID: {nearestAgroMob.ID}, HP: {nearestAgroMob.HP})");
+                    return;
+                }
+            }
+
             // Проверяем, есть ли текущая цель и жива ли она
             if (currentTarget.HasValue)
             {
@@ -730,10 +814,21 @@ namespace stats
                     // Обновляем отображение HP моба и проверяем, жив ли моб
                     if (targetMob.HasValue && targetMob.Value.HP > 0)
                     {
-                        // Моб жив - обновляем отображение и продолжаем атаковать
-                        lblMobHP.Text = $"Моб HP: {targetMob.Value.HP}";
-                        lblMobHP.ForeColor = Color.Orange;
-                        return; // Продолжаем атаковать текущую цель
+                        // Проверяем UniqueID - если слишком большой, пропускаем этого моба
+                        if (targetMob.Value.UniqueID > MAX_VALID_UNIQUE_ID)
+                        {
+                            AddLog($"Пропуск моба с некорректным UniqueID: {targetMob.Value.UniqueID}, переключаемся на другую цель");
+                            currentTarget = null;
+                            gameController.ClearTarget();
+                            // Продолжаем выполнение, чтобы найти новую цель
+                        }
+                        else
+                        {
+                            // Моб жив - обновляем отображение и продолжаем атаковать
+                            lblMobHP.Text = $"Моб HP: {targetMob.Value.HP}";
+                            lblMobHP.ForeColor = Color.Orange;
+                            return; // Продолжаем атаковать текущую цель
+                        }
                     }
                     else
                     {
@@ -754,19 +849,23 @@ namespace stats
                         // Отправляем клавишу E для сбора лута, если включено (синхронно, до поиска новой цели)
                         if (enableLootCollection)
                         {
+                            // Задержка перед сбором лута (имитация реакции игрока на убийство моба)
+                            int lootDelay = 100 + random.Next(0, 201); // 100-300мс
+                            System.Threading.Thread.Sleep(lootDelay);
+                            
                             isLooting = true;
                             lootStartTime = DateTime.Now;
                             AddLog("Начинаем сбор лута...");
                             // Выполняем сбор лута синхронно, чтобы не начинать атаку следующего моба
                             KeyboardHelper.SendKeyE(gameProcess, 5, AddLog);
-                            // Ждем завершения сбора лута (2 нажатия * 0.7 сек + буфер)
-                            System.Threading.Thread.Sleep(1000); // Дополнительная пауза для завершения
+                            // Ждем завершения сбора лута с небольшой дополнительной паузой
+                            System.Threading.Thread.Sleep(800 + random.Next(0, 401)); // 800-1200мс
                             isLooting = false;
                             AddLog("Сбор лута завершен");
                         }
                         
-                        // Добавляем случайную задержку 0.1-0.5 сек перед поиском нового моба
-                        int delayMs = random.Next(100, 501); // 100-500 мс
+                        // Добавляем случайную задержку перед поиском нового моба (уменьшена для реалистичности)
+                        int delayMs = 100 + random.Next(0, 151); // 100-250 мс
                         System.Threading.Thread.Sleep(delayMs);
                         
                         // После сбора лута и задержки - выходим, следующая итерация найдет новую цель
@@ -799,13 +898,17 @@ namespace stats
                     // Отправляем клавишу E для сбора лута, если включено (синхронно, до поиска новой цели)
                     if (enableLootCollection)
                     {
+                        // Задержка перед сбором лута (имитация реакции игрока на убийство моба)
+                        int lootDelay = 100 + random.Next(0, 201); // 100-300мс
+                        System.Threading.Thread.Sleep(lootDelay);
+                        
                         isLooting = true;
                         lootStartTime = DateTime.Now;
                         AddLog("Начинаем сбор лута...");
                         // Выполняем сбор лута синхронно, чтобы не начинать атаку следующего моба
                         KeyboardHelper.SendKeyE(gameProcess, 2, AddLog);
-                        // Ждем завершения сбора лута (2 нажатия * 0.7 сек + буфер)
-                        System.Threading.Thread.Sleep(2000); // Дополнительная пауза для завершения
+                        // Ждем завершения сбора лута с небольшой дополнительной паузой
+                        System.Threading.Thread.Sleep(1500 + random.Next(0, 501)); // 1500-2000мс
                         isLooting = false;
                         AddLog("Сбор лута завершен");
                     }
@@ -819,21 +922,34 @@ namespace stats
                 }
             }
 
-            // Ищем новую цель
-            var player = gameController.ReadPlayerData();
+            // Ищем новую цель (player уже прочитан выше для проверки агро)
+            // Если player невалидный, перечитываем
             if (!player.IsValid)
             {
+                player = gameController.ReadPlayerData();
+                if (!player.IsValid)
+                {
+                    return;
+                }
+            }
+
+            // Случайные "ошибки": иногда (1-2% случаев) пропускаем моба
+            if (random.Next(100) < 2)
+            {
+                AddLog("Пропущен моб (имитация ошибки игрока)");
+                System.Threading.Thread.Sleep(200 + random.Next(0, 301)); // Небольшая пауза
                 return;
             }
 
-            var nearestMob = gameController.FindNearestMob(player, targetMobIds);
+            var nearestMob = gameController.FindNearestMob(player, targetMobIds, random);
             if (nearestMob.HasValue && nearestMob.Value.HP > 0)
             {
                 // Находим адрес моба по UniqueID
                 var mobAddr = gameController.FindMobAddressByUniqueId(nearestMob.Value.UniqueID);
                 
-                // Добавляем случайную задержку 0.1-0.5 сек перед началом атаки нового моба
-                int delayMs = random.Next(100, 501); // 100-500 мс
+                // Добавляем случайную задержку перед началом атаки (имитация реакции игрока)
+                // 100-250мс (было 100-500мс, уменьшено для реалистичности)
+                int delayMs = 100 + random.Next(0, 151);
                 System.Threading.Thread.Sleep(delayMs);
                 
                 // Атакуем нового моба
@@ -846,7 +962,8 @@ namespace stats
                 
                 string mobName = gameController.GetMobName(nearestMob.Value.ID);
                 string addrInfo = mobAddr.HasValue ? mobAddr.Value.ToInt64().ToString("X") : "N/A";
-                AddLog($"Атака: {mobName} (ID: {nearestMob.Value.ID}, HP: {nearestMob.Value.HP}, UniqueID: {nearestMob.Value.UniqueID}, Адрес: {addrInfo})");
+                string agroInfo = (player.PlayerId > 0 && nearestMob.Value.TargetId == player.PlayerId) ? " [АГРО!]" : "";
+                AddLog($"Атака: {mobName} (ID: {nearestMob.Value.ID}, HP: {nearestMob.Value.HP}, UniqueID: {nearestMob.Value.UniqueID}{agroInfo}, Адрес: {addrInfo})");
             }
             else
             {
@@ -865,17 +982,16 @@ namespace stats
             
             if (enableBuff)
             {
-                // Запускаем таймер для бафа (раз в минуту = 60000 мс)
+                // Запускаем таймер для бафа с вариацией интервала
                 if (buffTimer == null)
                 {
-                    buffTimer = new Timer
-                    {
-                        Interval = 60000 // 1 минута
-                    };
+                    buffTimer = new Timer();
                     buffTimer.Tick += BuffTimer_Tick;
                 }
+                // Случайный интервал: 54-66 секунд (±10% от 60 секунд)
+                buffTimer.Interval = 54000 + random.Next(0, 12001);
                 buffTimer.Start();
-                AddLog("Баф включен (клавиша 3 раз в минуту)");
+                AddLog("Баф включен (клавиша 3 с вариацией интервала)");
             }
             else
             {
@@ -900,6 +1016,61 @@ namespace stats
             }
 
             KeyboardHelper.SendKey3(gameProcess, AddLog);
+            
+            // Обновляем интервал таймера с случайной вариацией для следующего бафа
+            if (buffTimer != null && random != null)
+            {
+                buffTimer.Interval = 54000 + random.Next(0, 12001); // 54-66 секунд (±10%)
+            }
+        }
+
+        private void ChkLootHighlight_CheckedChanged(object sender, EventArgs e)
+        {
+            enableLootHighlight = chkLootHighlight != null && chkLootHighlight.Checked;
+            
+            if (gameProcess == null || gameProcess.HasExited)
+            {
+                return;
+            }
+
+            try
+            {
+                IntPtr hWnd = gameProcess.MainWindowHandle;
+                if (hWnd == IntPtr.Zero)
+                {
+                    // Пробуем найти процесс по имени
+                    string processName = gameProcess.ProcessName;
+                    Process[] processes = Process.GetProcessesByName(processName);
+                    if (processes.Length > 0)
+                    {
+                        hWnd = processes[0].MainWindowHandle;
+                    }
+                }
+
+                if (hWnd != IntPtr.Zero)
+                {
+                    if (enableLootHighlight)
+                    {
+                        // Зажимаем Shift+E (держим зажатым)
+                        KeyboardHelper.PressShiftE(hWnd);
+                        AddLog($"Подсветка лута включена (Shift+E зажато, hWnd: {hWnd.ToInt64():X})");
+                    }
+                    else
+                    {
+                        // Отпускаем Shift+E
+                        KeyboardHelper.ReleaseShiftE(hWnd);
+                        AddLog("Подсветка лута выключена");
+                    }
+                }
+                else
+                {
+                    AddLog("ОШИБКА: Не удалось найти окно игры для подсветки лута");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Ошибка при изменении подсветки лута: {ex.Message}");
+            }
         }
 
         private void BtnCopyLogs_Click(object sender, EventArgs e)
@@ -966,6 +1137,23 @@ namespace stats
             {
                 buffTimer.Stop();
                 buffTimer.Dispose();
+            }
+
+            // Отпускаем Shift+E при закрытии формы, если было включено
+            if (enableLootHighlight && gameProcess != null && !gameProcess.HasExited)
+            {
+                try
+                {
+                    IntPtr hWnd = gameProcess.MainWindowHandle;
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        KeyboardHelper.ReleaseShiftE(hWnd);
+                    }
+                }
+                catch
+                {
+                    // Игнорируем ошибки
+                }
             }
 
             gameController?.Close();

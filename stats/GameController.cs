@@ -154,7 +154,9 @@ namespace stats
                             TargetId = memoryReader.ReadInt32(IntPtr.Add(mobAddr, currentOffsets.MobTargetIdOffset))
                         };
 
-                        if (mob.X != 0f || mob.Y != 0f || mob.Z != 0f)
+                        // Проверяем координаты и HP: моб должен иметь HP > 0 и не быть остаточными данными
+                        bool isNotResidual = !(mob.HP > 0 && mob.HP <= MAX_RESIDUAL_HP && mob.X == 0f && mob.Y == 0f && mob.Z == 0f);
+                        if ((mob.X != 0f || mob.Y != 0f || mob.Z != 0f) && mob.HP > 0 && isNotResidual)
                         {
                             if (targetMobIds.Count == 0 || targetMobIds.Contains(mob.ID))
                             {
@@ -231,22 +233,22 @@ namespace stats
             }
         }
 
+        // Порог низкого HP для определения остаточных данных мертвого моба
+        private const int MAX_RESIDUAL_HP = 15;
+
         // Найти всех мобов с агро (атакуют игрока)
         public List<MobData> FindMobsWithAgro(PlayerData player, HashSet<int> targetMobIds)
         {
             List<MobData> mobsWithAgro = new List<MobData>();
             
             if (!player.IsValid || player.PlayerId <= 0) return mobsWithAgro;
-
-            const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
             
             List<MobData> mobs = ReadMobList(targetMobIds);
             foreach (var mob in mobs)
             {
-                if (!mob.IsValid || mob.HP <= 0) continue;
-                
-                // Пропускаем мобов с некорректным UniqueID
-                if (mob.UniqueID > MAX_VALID_UNIQUE_ID) continue;
+                // Проверка: моб должен быть валидным, иметь HP > 0, и не быть остаточными данными
+                if (!mob.IsValid || mob.HP <= 0 
+                    || (mob.HP <= MAX_RESIDUAL_HP && mob.X == 0f && mob.Y == 0f && mob.Z == 0f)) continue;
                 
                 // Проверяем агро: если TargetId моба равен PlayerId игрока, значит моб нас атакует
                 if (mob.TargetId == player.PlayerId)
@@ -270,8 +272,6 @@ namespace stats
         {
             if (!player.IsValid) return null;
 
-            const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
-
             List<MobData> mobs = ReadMobList(targetMobIds);
             if (mobs.Count == 0) return null;
 
@@ -281,10 +281,9 @@ namespace stats
 
             foreach (var mob in mobs)
             {
-                if (!mob.IsValid || mob.HP <= 0) continue;
-                
-                // Пропускаем мобов с некорректным UniqueID
-                if (mob.UniqueID > MAX_VALID_UNIQUE_ID) continue;
+                // Проверка: моб должен быть валидным, иметь HP > 0, и не быть остаточными данными
+                if (!mob.IsValid || mob.HP <= 0 
+                    || (mob.HP <= MAX_RESIDUAL_HP && mob.X == 0f && mob.Y == 0f && mob.Z == 0f)) continue;
 
                 float distance = CalculateDistance(player.X, player.Y, player.Z, mob.X, mob.Y, mob.Z);
                 

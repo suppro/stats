@@ -31,8 +31,12 @@ namespace stats
         private DateTime lastPauseTime = DateTime.MinValue;
         private bool isPausing = false; // Флаг активной паузы
         
-        // Максимальное значение UniqueID для моба (мобы с большим UniqueID пропускаются)
-        private const long MAX_VALID_UNIQUE_ID = 10000000000; // 10^10
+        // Максимальное HP персонажа (для расчета процентов)
+        private int playerMaxHP = 0;
+        
+        // Порог низкого HP для определения остаточных данных мертвого моба
+        // Если HP в этом диапазоне И координаты (0,0,0), то это остаточные данные от мертвого моба
+        private const int MAX_RESIDUAL_HP = 15;
         
         // Кэш для списка мобов (адреса статичные, сканируем только 1 раз при старте)
         private bool addressesScanned = false;
@@ -41,9 +45,11 @@ namespace stats
         // Labels для персонажа
         private Label lblPlayerHP;
         private Label lblPlayerMP;
+        private Label lblPlayerId;
         
         // Label для моба
         private Label lblMobHP;
+        private Label lblMobTargetId;
 
         // Label для статуса
         private Label lblStatus;
@@ -121,6 +127,18 @@ namespace stats
                 Location = new Point(30, yPos)
             };
             this.Controls.Add(lblPlayerMP);
+            yPos += 25;
+
+            // ID персонажа
+            lblPlayerId = new Label
+            {
+                Text = "Player ID: ---",
+                ForeColor = Color.LightBlue,
+                Font = new Font("Segoe UI", 10F),
+                AutoSize = true,
+                Location = new Point(30, yPos)
+            };
+            this.Controls.Add(lblPlayerId);
             yPos += 40;
 
             // HP моба
@@ -133,6 +151,18 @@ namespace stats
                 Location = new Point(30, yPos)
             };
             this.Controls.Add(lblMobHP);
+            yPos += 25;
+
+            // TargetId моба
+            lblMobTargetId = new Label
+            {
+                Text = "Target ID: ---",
+                ForeColor = Color.Yellow,
+                Font = new Font("Segoe UI", 10F),
+                AutoSize = true,
+                Location = new Point(30, yPos)
+            };
+            this.Controls.Add(lblMobTargetId);
             yPos += 40;
 
             // Выбор сервера
@@ -228,7 +258,7 @@ namespace stats
             // Чекбокс автохила
             chkAutoHeal = new CheckBox
             {
-                Text = "Автохил (1 при HP < 80, до HP > 120)",
+                Text = "Автохил (1 при HP ≤ 50%, до 80%)",
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 11F),
                 AutoSize = true,
@@ -454,22 +484,32 @@ namespace stats
         {
             lblPlayerHP.Text = "HP: ---";
             lblPlayerMP.Text = "MP: ---";
+            lblPlayerId.Text = "Player ID: ---";
             lblMobHP.Text = "Моб HP: ---";
+            lblMobTargetId.Text = "Target ID: ---";
         }
 
         private void UpdatePlayerData(PlayerData data)
         {
             if (data.IsValid)
             {
+                // Обновляем максимальное HP, если текущее больше сохраненного
+                if (data.HP > playerMaxHP)
+                {
+                    playerMaxHP = data.HP;
+                }
+                
                 lblPlayerHP.Text = $"HP: {data.HP}";
                 lblPlayerHP.ForeColor = Color.Red;
                 lblPlayerMP.Text = $"MP: {data.MP}";
                 lblPlayerMP.ForeColor = Color.Blue;
+                lblPlayerId.Text = $"Player ID: {data.PlayerId}";
             }
             else
             {
                 lblPlayerHP.Text = "HP: ---";
                 lblPlayerMP.Text = "MP: ---";
+                lblPlayerId.Text = "Player ID: ---";
             }
         }
 
@@ -542,8 +582,22 @@ namespace stats
                     return;
                 }
 
-                // Если HP меньше 80, лечим до тех пор, пока не станет больше 120
-                if (playerData.HP < 80)
+                // Обновляем максимальное HP, если текущее больше сохраненного
+                if (playerData.HP > playerMaxHP)
+                {
+                    playerMaxHP = playerData.HP;
+                }
+
+                // Если максимальное HP еще не определено (меньше 100), используем текущее как максимум
+                if (playerMaxHP < 100)
+                {
+                    playerMaxHP = Math.Max(playerMaxHP, playerData.HP);
+                }
+
+                // Начинаем хил от 50% и меньше, лечим до 80%
+                double hpPercent = playerMaxHP > 0 ? (double)playerData.HP / playerMaxHP * 100.0 : 0;
+                
+                if (hpPercent <= 50.0)
                 {
                     if (gameProcess == null || gameProcess.HasExited)
                     {
@@ -552,8 +606,10 @@ namespace stats
 
                     int maxHealAttempts = 20; // Максимум попыток лечения
                     int attempts = 0;
+                    double targetPercent = 80.0; // Цель - 80%
+                    int targetHP = (int)(playerMaxHP * targetPercent / 100.0);
 
-                    while (playerData.HP <= 120 && attempts < maxHealAttempts)
+                    while (hpPercent < targetPercent && attempts < maxHealAttempts)
                     {
                         KeyboardHelper.SendKey1(gameProcess);
                         // Случайная задержка между нажатиями: 450-550мс (±10%)
@@ -567,16 +623,19 @@ namespace stats
                             break;
                         }
 
+                        // Пересчитываем процент
+                        hpPercent = playerMaxHP > 0 ? (double)playerData.HP / playerMaxHP * 100.0 : 0;
+
                         attempts++;
                     }
 
-                    if (playerData.HP > 120)
+                    if (hpPercent >= targetPercent)
                     {
-                        AddLog($"Автохил: HP восстановлено до {playerData.HP}");
+                        AddLog($"Автохил: HP восстановлено до {playerData.HP} ({hpPercent:F1}%)");
                     }
                     else if (attempts >= maxHealAttempts)
                     {
-                        AddLog($"Автохил: достигнут лимит попыток ({maxHealAttempts}), текущий HP: {playerData.HP}");
+                        AddLog($"Автохил: достигнут лимит попыток ({maxHealAttempts}), текущий HP: {playerData.HP} ({hpPercent:F1}%)");
                     }
                 }
             }
@@ -609,6 +668,7 @@ namespace stats
             currentTarget = null;
             enableLootCollection = chkLootCollection.Checked;
             enableAutoHeal = chkAutoHeal.Checked;
+            enableBuff = chkBuff.Checked;
 
             btnStart.Enabled = false;
             btnStop.Enabled = true;
@@ -660,6 +720,9 @@ namespace stats
                             // Случайный интервал: 450-550мс (±10%)
                             attackTimer.Interval = 450 + random.Next(0, 101);
                             attackTimer.Start();
+                            
+                            // Запускаем баф, если включен
+                            StartBuffTimerIfEnabled();
                         }
                         else
                         {
@@ -690,6 +753,9 @@ namespace stats
                 // Случайный интервал: 450-550мс (±10%)
                 attackTimer.Interval = 450 + random.Next(0, 101);
                 attackTimer.Start();
+                
+                // Запускаем баф, если включен
+                StartBuffTimerIfEnabled();
             }
         }
 
@@ -706,6 +772,12 @@ namespace stats
             if (attackTimer != null)
             {
                 attackTimer.Stop();
+            }
+
+            // Останавливаем баф при остановке атаки
+            if (buffTimer != null)
+            {
+                buffTimer.Stop();
             }
 
             btnStart.Enabled = true;
@@ -811,29 +883,52 @@ namespace stats
                     // Читаем данные текущей цели напрямую (без полного сканирования)
                     var targetMob = gameController.ReadMobByAddress(targetAddr.Value);
 
-                    // Обновляем отображение HP моба и проверяем, жив ли моб
-                    if (targetMob.HasValue && targetMob.Value.HP > 0)
+                    // Проверка: моб считается мертвым если:
+                    // 1. Данные невалидны
+                    // 2. HP <= 0 (основная проверка)
+                    // 3. HP очень низкое (1-15) И координаты (0,0,0) - это остаточные данные от мертвого моба
+                    bool isMobDead = !targetMob.HasValue 
+                        || targetMob.Value.HP <= 0
+                        || (targetMob.Value.HP > 0 && targetMob.Value.HP <= MAX_RESIDUAL_HP 
+                            && targetMob.Value.X == 0f && targetMob.Value.Y == 0f && targetMob.Value.Z == 0f);
+
+                    if (!isMobDead)
                     {
-                        // Проверяем UniqueID - если слишком большой, пропускаем этого моба
-                        if (targetMob.Value.UniqueID > MAX_VALID_UNIQUE_ID)
-                        {
-                            AddLog($"Пропуск моба с некорректным UniqueID: {targetMob.Value.UniqueID}, переключаемся на другую цель");
-                            currentTarget = null;
-                            gameController.ClearTarget();
-                            // Продолжаем выполнение, чтобы найти новую цель
-                        }
-                        else
-                        {
-                            // Моб жив - обновляем отображение и продолжаем атаковать
-                            lblMobHP.Text = $"Моб HP: {targetMob.Value.HP}";
-                            lblMobHP.ForeColor = Color.Orange;
+                        // Моб жив - но сначала проверяем, нет ли мобов с агро (приоритет выше)
+                            if (player.IsValid && player.PlayerId > 0)
+                            {
+                                var mobsWithAgro = gameController.FindMobsWithAgro(player, targetMobIds);
+                                // Если есть мобы с агро и текущая цель не является мобом с агро, переключаемся
+                                if (mobsWithAgro.Count > 0 && targetMob.Value.TargetId != player.PlayerId)
+                                {
+                                    var nearestAgroMob = mobsWithAgro[0];
+                                    currentTarget = nearestAgroMob;
+                                    gameController.AttackMob(nearestAgroMob);
+                                    
+                                    lblMobHP.Text = $"Моб HP: {nearestAgroMob.HP} [АГРО]";
+                                    lblMobHP.ForeColor = Color.Red;
+                                    lblMobTargetId.Text = $"Target ID: {nearestAgroMob.TargetId}";
+                                    
+                                    string mobName = gameController.GetMobName(nearestAgroMob.ID);
+                                    AddLog($"Переключение на моба с агро: {mobName} (ID: {nearestAgroMob.ID}, HP: {nearestAgroMob.HP})");
+                                    return;
+                                }
+                            }
+                            
+                            // Если текущая цель - моб с агро, или мобов с агро нет, продолжаем атаковать текущую цель
+                            bool isCurrentTargetAgro = (player.IsValid && player.PlayerId > 0 && targetMob.Value.TargetId == player.PlayerId);
+                            lblMobHP.Text = $"Моб HP: {targetMob.Value.HP}" + (isCurrentTargetAgro ? " [АГРО]" : "");
+                            lblMobHP.ForeColor = isCurrentTargetAgro ? Color.Red : Color.Orange;
+                            lblMobTargetId.Text = $"Target ID: {targetMob.Value.TargetId}";
                             return; // Продолжаем атаковать текущую цель
-                        }
                     }
                     else
                     {
-                        // HP = 0 или моб не найден - моб убит
-                        lblMobHP.Text = "Моб HP: 0";
+                        // Моб мертв: HP = 0 или остаточные данные (низкое HP + нулевые координаты)
+                        int lastHP = targetMob.HasValue ? targetMob.Value.HP : 0;
+                        int lastTargetId = targetMob.HasValue ? targetMob.Value.TargetId : 0;
+                        lblMobHP.Text = $"Моб HP: {lastHP}";
+                        lblMobTargetId.Text = $"Target ID: {lastTargetId}";
                         
                         int killedMobId = currentTarget.Value.ID;
                         string mobName = gameController.GetMobName(killedMobId);
@@ -842,7 +937,7 @@ namespace stats
                         currentTarget = null;
                         gameController.ClearTarget();
 
-                        AddLog($"Моб убит: {mobName} (ID: {killedMobId})");
+                        AddLog($"Моб убит: {mobName} (ID: {killedMobId}, HP: {lastHP})");
 
                         lblKilledCount.Text = $"Убито: {killedMobCount}";
                         
@@ -893,6 +988,7 @@ namespace stats
                     AddLog($"Моб убит (исчез из памяти): {mobName} (ID: {killedMobId})");
                     
                     lblMobHP.Text = "Моб HP: ---";
+                    lblMobTargetId.Text = "Target ID: ---";
                     lblKilledCount.Text = $"Убито: {killedMobCount}";
                     
                     // Отправляем клавишу E для сбора лута, если включено (синхронно, до поиска новой цели)
@@ -942,7 +1038,12 @@ namespace stats
             }
 
             var nearestMob = gameController.FindNearestMob(player, targetMobIds, random);
-            if (nearestMob.HasValue && nearestMob.Value.HP > 0)
+            // Проверка: моб должен быть валидным и иметь HP > 0, и не быть остаточными данными
+            bool isValidMob = nearestMob.HasValue 
+                && nearestMob.Value.HP > 0
+                && !(nearestMob.Value.HP <= MAX_RESIDUAL_HP 
+                    && nearestMob.Value.X == 0f && nearestMob.Value.Y == 0f && nearestMob.Value.Z == 0f);
+            if (isValidMob)
             {
                 // Находим адрес моба по UniqueID
                 var mobAddr = gameController.FindMobAddressByUniqueId(nearestMob.Value.UniqueID);
@@ -959,6 +1060,7 @@ namespace stats
                 // Обновляем отображение HP моба
                 lblMobHP.Text = $"Моб HP: {nearestMob.Value.HP}";
                 lblMobHP.ForeColor = Color.Orange;
+                lblMobTargetId.Text = $"Target ID: {nearestMob.Value.TargetId}";
                 
                 string mobName = gameController.GetMobName(nearestMob.Value.ID);
                 string addrInfo = mobAddr.HasValue ? mobAddr.Value.ToInt64().ToString("X") : "N/A";
@@ -980,22 +1082,14 @@ namespace stats
         {
             enableBuff = chkBuff != null && chkBuff.Checked;
             
+            // Баф будет запущен только при старте автоатаки, здесь только устанавливаем флаг
             if (enableBuff)
             {
-                // Запускаем таймер для бафа с вариацией интервала
-                if (buffTimer == null)
-                {
-                    buffTimer = new Timer();
-                    buffTimer.Tick += BuffTimer_Tick;
-                }
-                // Случайный интервал: 54-66 секунд (±10% от 60 секунд)
-                buffTimer.Interval = 54000 + random.Next(0, 12001);
-                buffTimer.Start();
-                AddLog("Баф включен (клавиша 3 с вариацией интервала)");
+                AddLog("Баф будет включен при старте автоатаки");
             }
             else
             {
-                // Останавливаем таймер
+                // Останавливаем таймер, если он запущен
                 if (buffTimer != null)
                 {
                     buffTimer.Stop();
@@ -1006,7 +1100,8 @@ namespace stats
 
         private void BuffTimer_Tick(object sender, EventArgs e)
         {
-            if (!enableBuff || gameProcess == null || gameProcess.HasExited)
+            // Баф работает только во время автоатаки
+            if (!enableBuff || !isAttacking || gameProcess == null || gameProcess.HasExited)
             {
                 if (buffTimer != null)
                 {
@@ -1018,9 +1113,27 @@ namespace stats
             KeyboardHelper.SendKey3(gameProcess, AddLog);
             
             // Обновляем интервал таймера с случайной вариацией для следующего бафа
+            // Интервал: 55-65 секунд (±5 секунд от 60 секунд)
             if (buffTimer != null && random != null)
             {
-                buffTimer.Interval = 54000 + random.Next(0, 12001); // 54-66 секунд (±10%)
+                buffTimer.Interval = 55000 + random.Next(0, 10001); // 55-65 секунд (±5 сек)
+            }
+        }
+
+        private void StartBuffTimerIfEnabled()
+        {
+            if (enableBuff && isAttacking)
+            {
+                // Запускаем таймер для бафа с вариацией интервала
+                if (buffTimer == null)
+                {
+                    buffTimer = new Timer();
+                    buffTimer.Tick += BuffTimer_Tick;
+                }
+                // Случайный интервал: 55-65 секунд (±5 секунд от 60 секунд)
+                buffTimer.Interval = 55000 + random.Next(0, 10001);
+                buffTimer.Start();
+                AddLog("Баф включен (клавиша 3 каждые 55-65 секунд)");
             }
         }
 
